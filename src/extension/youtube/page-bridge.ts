@@ -108,6 +108,17 @@ function timestampMs(text: string): number | undefined {
   return Math.round(parts.reduce((total, part) => total * 60 + part, 0) * 1000);
 }
 
+function removeTranscriptTimestamps(text: string): string {
+  return text.replace(/(^|\s)\d{1,2}(?:[:.：]\d{2}){1,2}(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function hideTranscriptPanel(): void {
+  const panel = document.querySelector<HTMLElement>("ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']");
+  const closeButton = panel?.querySelector<HTMLElement>("#visibility-button button, button[aria-label*='Close' i], button[aria-label*='Đóng' i]");
+  if (closeButton) closeButton.click();
+  else panel?.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN");
+}
+
 function transcriptSegmentsFromDom(): TranscriptSegment[] {
   const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model")];
   const segments = rows.flatMap((row, index) => {
@@ -119,9 +130,7 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
       ?? rawText.match(/^\d{1,2}(?:[:.：]\d{2}){1,2}/)?.[0]
       ?? "";
     const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
-    const sourceText = (directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length))
-      .replace(/\s+/g, " ").trim()
-      .replace(/^\d{1,2}(?:[:.：]\d{2}){1,2}\s*/, "").trim();
+    const sourceText = removeTranscriptTimestamps(directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length));
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];
@@ -131,7 +140,10 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
 
 async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
   let segments = transcriptSegmentsFromDom();
-  if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+  if (segments.length) {
+    hideTranscriptPanel();
+    return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+  }
 
   const expander = document.querySelector<HTMLElement>(
     "ytd-watch-metadata #description-inline-expander #expand, ytd-watch-metadata ytd-text-inline-expander #expand, ytd-watch-metadata tp-yt-paper-button#expand",
@@ -152,7 +164,10 @@ async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
   if (!transcriptButton) return undefined;
   for (let attempt = 0; attempt < 70; attempt += 1) {
     segments = transcriptSegmentsFromDom();
-    if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+    if (segments.length) {
+      hideTranscriptPanel();
+      return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return undefined;
