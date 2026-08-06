@@ -22,7 +22,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - TTS chạy tối đa 3 request đồng thời; scheduler bật trước và popup chuyển sang “Sẵn sàng” ngay khi audio đầu tiên vào bộ đệm, phần còn lại tiếp tục tạo nền.
 - Bộ đệm liên tục ưu tiên batch 8 câu gần `video.currentTime`, chuẩn bị cửa sổ 45 giây, lấy transcript backend theo vùng 60 giây và nạp batch kế tiếp sau 250 ms; khi đủ bộ đệm mới chờ 4 giây kiểm tra lại.
 - Scheduler không cắt câu Việt ngay khi timestamp câu sau tới; tốc độ được tính từ thời lượng MP3 thật và chỉ resync khi câu vượt khung quá 3 giây.
-- Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x, bỏ qua câu đến trễ quá 800 ms thay vì đọc đuổi và resync khi vượt khung quá 3 giây.
+- Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x. Câu kế tiếp không bị đánh dấu bỏ qua khi câu trước còn nói và được phép bắt đầu muộn tối đa 5 giây; chỉ bỏ qua khi scheduler đang rảnh mà timestamp đã trôi quá xa.
 - Khi tab YouTube bị ẩn, video được pause ngay và dubbing pause theo; service worker còn theo dõi focus cấp cửa sổ để pause mọi tab YouTube đang dubbing khi người dùng chuyển từ Chrome sang ứng dụng khác như VS Code. Khi quay lại không tự phát tiếp.
 - Lập lịch theo `video.currentTime`; xử lý pause/resume, seek, playback rate và chuyển video.
 - Âm lượng gốc được giữ ổn định ở mức đã chọn trong toàn bộ phiên dubbing, không tăng lại giữa các câu; chỉ khôi phục khi dừng phiên hoặc chuyển video.
@@ -58,3 +58,4 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Rate limit in-memory không dùng chung giữa các Vercel instance.
 - `msedge-tts` là client không chính thức; cần provider dự phòng trước production.
 - `.env.example` đã được xác minh không chứa khóa; khóa Groq nằm trong `.env.local` đã bị Git bỏ qua.
+- Kiểm tra playback rate: đồng bộ hiện tại theo kịp khoảng 0.5x–1.25x; từ 1.5x trở lên audio bị giới hạn 1.3x nên có thể trễ và phải resync/bỏ cụm. Ở 0.5x–0.75x giọng bị giới hạn tối thiểu 0.85x nên sẽ có khoảng nghỉ giữa các cụm.

@@ -2,7 +2,7 @@ import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url: string }
 const MAX_OVERRUN_MS = 3_000;
-const MAX_START_LATENESS_MS = 800;
+const MAX_START_LATENESS_MS = 5_000;
 const MIN_SMOOTH_RATE = 0.95;
 const MAX_SMOOTH_RATE = 1.15;
 
@@ -40,12 +40,13 @@ export class AudioScheduler {
     this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
     const tick = (): void => {
       const now = this.video.currentTime * 1000;
-      for (const { segment } of this.items.values()) {
-        if (segment.startMs < now - MAX_START_LATENESS_MS) this.played.add(segment.id);
-      }
-      const match = !this.active ? [...this.items.values()].find(({ segment }) => now >= segment.startMs && now < segment.endMs && !this.played.has(segment.id)) : undefined;
-      if (match && !this.video.paused) this.play(match);
       if (this.active && now > Number(this.active.audio.dataset.endMs) + MAX_OVERRUN_MS) this.finishActive();
+      const match = !this.active ? [...this.items.values()].find(({ segment }) =>
+        now >= segment.startMs
+        && now < segment.endMs
+        && now - segment.startMs <= MAX_START_LATENESS_MS
+        && !this.played.has(segment.id)) : undefined;
+      if (match && !this.video.paused) this.play(match);
       this.frame = requestAnimationFrame(tick);
     };
     this.frame = requestAnimationFrame(tick);
