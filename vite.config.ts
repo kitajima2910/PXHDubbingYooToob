@@ -10,10 +10,11 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, "popup.html"),
         content: resolve(__dirname, "src/extension/content.ts"),
+        background: resolve(__dirname, "src/extension/background.ts"),
         "page-bridge": resolve(__dirname, "src/extension/youtube/page-bridge.ts"),
       },
       output: {
-        entryFileNames: (chunk) => ["content", "page-bridge"].includes(chunk.name) ? `${chunk.name}.js` : "assets/[name]-[hash].js",
+        entryFileNames: (chunk) => ["content", "background", "page-bridge"].includes(chunk.name) ? `${chunk.name}.js` : "assets/[name]-[hash].js",
       },
     },
   },

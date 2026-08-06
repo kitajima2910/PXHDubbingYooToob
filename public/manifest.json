@@ -6,6 +6,7 @@
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://*.vercel.app/*"],
   "action": { "default_popup": "popup.html", "default_title": "PXHDubbingYooToob" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/watch*"],
