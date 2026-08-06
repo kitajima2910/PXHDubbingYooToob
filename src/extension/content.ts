@@ -12,9 +12,71 @@ let whisperMode = false;
 let whisperDelaySeconds = 5;
 let whisperChunkIndex = 0;
 let whisperQueue: Promise<void> = Promise.resolve();
+let pendingWhisperChunk: { audioBase64: string; mimeType: string } | undefined;
+let floatingButton: HTMLButtonElement | undefined;
+let floatingBusy = false;
+
+function takePendingWhisperChunk(): { audioBase64: string; mimeType: string } | undefined {
+  const chunk = pendingWhisperChunk;
+  pendingWhisperChunk = undefined;
+  return chunk;
+}
 
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
-function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
+function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; renderFloatingButton(); }
+
+const playIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>`;
+const stopIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>`;
+const spinnerIcon = `<span class="spinner" aria-hidden="true"></span>`;
+
+function renderFloatingButton(): void {
+  if (!floatingButton) return;
+  const loading = floatingBusy || (state.enabled && ["loading", "translating", "speaking"].includes(state.status));
+  floatingButton.innerHTML = loading ? spinnerIcon : state.enabled ? stopIcon : playIcon;
+  floatingButton.dataset.active = String(state.enabled);
+  floatingButton.dataset.error = String(state.status === "error");
+  floatingButton.setAttribute("aria-label", state.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng");
+  floatingButton.title = state.status === "error" ? state.message : state.enabled ? `Dừng — ${state.message}` : "Bắt đầu lồng tiếng";
+}
+
+function createFloatingControl(): void {
+  if (document.querySelector("#pxh-dubbing-control")) return;
+  const host = document.createElement("div");
+  host.id = "pxh-dubbing-control";
+  const shadow = host.attachShadow({ mode: "closed" });
+  shadow.innerHTML = `<style>
+    :host{all:initial}.wrap{position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:2147483647;display:flex;align-items:center;gap:9px;font:600 12px system-ui,sans-serif}
+    button{width:58px;height:58px;border:1px solid #ffffff38;border-radius:50%;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#ff3048,#c50021);box-shadow:0 10px 30px #0008,0 0 0 5px #e7193720;cursor:pointer;transition:transform .18s,box-shadow .18s,filter .18s}
+    button:hover{transform:scale(1.07);box-shadow:0 12px 34px #0009,0 0 0 7px #e7193728}button:active{transform:scale(.96)}button[data-active="true"]{background:linear-gradient(145deg,#2a303b,#11141a)}button[data-error="true"]{background:linear-gradient(145deg,#ff6b35,#c92b19)}
+    svg{width:26px;height:26px;fill:currentColor}.spinner{width:22px;height:22px;border:3px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}.hint{padding:8px 11px;border:1px solid #ffffff18;border-radius:9px;color:#fff;background:#11141aeb;box-shadow:0 6px 20px #0006;opacity:0;transform:translateX(-5px);pointer-events:none;transition:.18s;white-space:nowrap}.wrap:hover .hint{opacity:1;transform:none}@keyframes spin{to{transform:rotate(360deg)}}
+  </style><div class="wrap"><button type="button"></button><span class="hint">PXH Dubbing</span></div>`;
+  floatingButton = shadow.querySelector<HTMLButtonElement>("button")!;
+  floatingButton.addEventListener("click", () => { void toggleFromFloatingButton(); });
+  document.documentElement.append(host);
+  renderFloatingButton();
+}
+
+async function toggleFromFloatingButton(): Promise<void> {
+  if (floatingBusy) return;
+  floatingBusy = true; renderFloatingButton();
+  try {
+    if (state.enabled) { await stop(); return; }
+    const stored = await chrome.storage.local.get({ delaySeconds: 5, sourceVolume: 0.25 });
+    const delaySeconds = Number(stored.delaySeconds);
+    const sourceVolume = Number(stored.sourceVolume);
+    const capture = await chrome.runtime.sendMessage({ action: "capture-start", sourceVolume }) as { ok?: boolean; message?: string };
+    const captureReady = capture?.ok === true;
+    const result = await start(delaySeconds, sourceVolume);
+    if (result.source === "Groq Whisper" && !captureReady) {
+      await stop();
+      throw new Error(capture?.message ?? "Whisper cần bạn mở icon extension một lần để cấp quyền thu âm tab");
+    }
+    if (!result.enabled && result.status === "error") void chrome.runtime.sendMessage({ action: "capture-stop" });
+  } catch (error) {
+    void chrome.runtime.sendMessage({ action: "capture-stop" });
+    fail(error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng");
+  } finally { floatingBusy = false; renderFloatingButton(); }
+}
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -77,6 +139,16 @@ async function processWhisperChunk(audioBase64: string, mimeType: string, signal
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
 }
 
+function queueWhisperChunk(audioBase64: string, mimeType: string, signal: AbortSignal): void {
+  whisperQueue = whisperQueue.then(() => processWhisperChunk(audioBase64, mimeType, signal)).catch((error: unknown) => {
+    if (!signal.aborted) {
+      whisperMode = false;
+      void chrome.runtime.sendMessage({ action: "capture-stop" });
+      update({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Whisper không thể xử lý audio" });
+    }
+  });
+}
+
 async function bufferContinuously(
   video: HTMLVideoElement,
   sessionVideoId: string,
@@ -111,7 +183,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   if (!video || !videoId()) return fail("Không tìm thấy video YouTube");
   currentVideoId = videoId();
   controller = new AbortController();
-  whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperQueue = Promise.resolve();
+  whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperQueue = Promise.resolve(); pendingWhisperChunk = undefined;
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
@@ -129,6 +201,10 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
         scheduler.setSourceVolume(1);
         update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Groq Whisper" });
         scheduler.start();
+        const chunk = takePendingWhisperChunk();
+        if (chunk) {
+          queueWhisperChunk(chunk.audioBase64, chunk.mimeType, sessionController.signal);
+        }
         return state;
       }
     }
@@ -157,7 +233,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
-  whisperMode = false; whisperQueue = Promise.resolve();
+  whisperMode = false; whisperQueue = Promise.resolve(); pendingWhisperChunk = undefined;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
@@ -180,15 +256,10 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   if (request.action === "pause-window") { respond(pauseForLostFocus()); return; }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
-    if (whisperMode && controller && chunk.audioBase64 && chunk.mimeType) {
+    if (controller && chunk.audioBase64 && chunk.mimeType) {
       const signal = controller.signal;
-      whisperQueue = whisperQueue.then(() => processWhisperChunk(chunk.audioBase64!, chunk.mimeType!, signal)).catch((error: unknown) => {
-        if (!signal.aborted) {
-          whisperMode = false;
-          void chrome.runtime.sendMessage({ action: "capture-stop" });
-          update({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Whisper không thể xử lý audio" });
-        }
-      });
+      if (whisperMode) queueWhisperChunk(chunk.audioBase64, chunk.mimeType, signal);
+      else pendingWhisperChunk = { audioBase64: chunk.audioBase64, mimeType: chunk.mimeType };
     }
     respond({ ok: true }); return;
   }
@@ -202,3 +273,5 @@ setInterval(() => { if (state.enabled && currentVideoId && videoId() !== current
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) pauseForLostFocus();
 });
+
+createFloatingControl();

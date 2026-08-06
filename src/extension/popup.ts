@@ -5,71 +5,57 @@ const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
 
 app.innerHTML = `
-  <h1>PXHDubbingYooToob</h1>
-  <p id="status">Đang kiểm tra…</p>
-  <dl><div><dt>Giọng đọc</dt><dd>Hoài My</dd></div><div><dt>Nguồn phụ đề</dt><dd id="source">—</dd></div><div><dt>Đã xử lý</dt><dd id="count">0 đoạn</dd></div></dl>
-  <label>Độ trễ <input id="delay" type="range" min="2" max="15" value="5"><span id="delayValue">5 giây</span></label>
-  <label>Âm lượng giọng gốc <input id="volume" type="range" min="0" max="100" value="25"><span id="volumeValue">25%</span></label>
-  <button id="toggle">Bắt đầu lồng tiếng</button>
-  <button id="retry" class="secondary" hidden>Thử lại</button>`;
+  <header><span class="brand-mark">PXH</span><div><h1>PXH Dubbing YooToob</h1><p>AI Vietnamese voice settings</p></div></header>
+  <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
+  <section class="info-grid">
+    <div><span>Giọng đọc</span><strong>Hoài My</strong></div>
+    <div><span>Nguồn</span><strong id="source">—</strong></div>
+    <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
+  </section>
+  <section class="settings">
+    <div class="section-title">CÀI ĐẶT PHÁT</div>
+    <label><div><span>Độ trễ</span><output id="delayValue">5 giây</output></div><input id="delay" type="range" min="2" max="15" value="5"></label>
+    <label><div><span>Âm lượng giọng gốc</span><output id="volumeValue">25%</output></div><input id="volume" type="range" min="0" max="100" value="25"></label>
+  </section>
+  <footer>Cài đặt tự lưu. Đóng popup và nhấn Play nổi bên trái video.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
-const toggle = query<HTMLButtonElement>("#toggle");
-const retry = query<HTMLButtonElement>("#retry");
-let currentState: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
-let busy = false;
-let interactionVersion = 0;
+const delay = query<HTMLInputElement>("#delay");
+const volume = query<HTMLInputElement>("#volume");
 
 async function activeTab(): Promise<number | undefined> {
   return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
 }
 
 function render(state?: ExtensionState): void {
-  const value = state ?? { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
-  currentState = value;
+  const value = state ?? { enabled: false, status: "idle", message: "Mở một video YouTube", processedSegments: 0, source: "—" };
   query("#status").textContent = value.message;
   query("#source").textContent = value.source;
   query("#count").textContent = `${value.processedSegments} đoạn`;
-  toggle.textContent = value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
-  retry.hidden = value.status !== "error";
+  query("#statusDot").className = `status-dot ${value.status}`;
 }
 
-async function send(action: "start" | "stop"): Promise<void> {
-  if (busy) return;
-  busy = true;
-  const version = ++interactionVersion;
-  toggle.disabled = true;
-  render({ ...currentState, enabled: action === "start", status: action === "start" ? "loading" : "idle", message: action === "start" ? "Đang tải phụ đề" : "Đang dừng lồng tiếng" });
-  const tabId = await activeTab();
-  if (!tabId) {
-    render({ enabled: false, status: "error", message: "Hãy mở một video YouTube", processedSegments: 0, source: "—" });
-    busy = false; toggle.disabled = false; return;
-  }
-  const delaySeconds = Number(query<HTMLInputElement>("#delay").value);
-  const sourceVolume = Number(query<HTMLInputElement>("#volume").value) / 100;
-  try {
-    if (action === "start") {
-      const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId, sourceVolume }) as { ok?: boolean; message?: string };
-      if (!capture?.ok) throw new Error(capture?.message ?? "Không thể thu âm tab");
-    }
-    if (version === interactionVersion) render(await chrome.tabs.sendMessage(tabId, { action, delaySeconds, sourceVolume }) as ExtensionState);
-    if (action === "stop") await chrome.runtime.sendMessage({ action: "capture-stop" });
-  }
-  catch {
-    if (action === "start") void chrome.runtime.sendMessage({ action: "capture-stop" });
-    if (version === interactionVersion) render({ enabled: false, status: "error", message: "Không thể kết nối hoặc thu âm tab YouTube. Hãy tải lại trang.", processedSegments: 0, source: "—" });
-  }
-  finally { if (version === interactionVersion) { busy = false; toggle.disabled = false; } }
+function showSettings(delaySeconds: number, sourceVolume: number): void {
+  delay.value = String(delaySeconds);
+  volume.value = String(Math.round(sourceVolume * 100));
+  query("#delayValue").textContent = `${delay.value} giây`;
+  query("#volumeValue").textContent = `${volume.value}%`;
 }
 
-toggle.addEventListener("click", async () => send(currentState.enabled ? "stop" : "start"));
-retry.addEventListener("click", async () => send("start"));
-for (const id of ["delay", "volume"] as const) query<HTMLInputElement>(`#${id}`).addEventListener("input", (event) => {
-  const input = event.currentTarget as HTMLInputElement;
-  query(`#${id}Value`).textContent = id === "delay" ? `${input.value} giây` : `${input.value}%`;
+void chrome.storage.local.get({ delaySeconds: 5, sourceVolume: 0.25 }).then((stored) => {
+  showSettings(Number(stored.delaySeconds), Number(stored.sourceVolume));
 });
-const initialVersion = interactionVersion;
+
+delay.addEventListener("input", () => {
+  query("#delayValue").textContent = `${delay.value} giây`;
+  void chrome.storage.local.set({ delaySeconds: Number(delay.value) });
+});
+volume.addEventListener("input", () => {
+  query("#volumeValue").textContent = `${volume.value}%`;
+  void chrome.storage.local.set({ sourceVolume: Number(volume.value) / 100 });
+});
+
 void activeTab().then(async (tabId) => {
-  const result = tabId ? await chrome.tabs.sendMessage(tabId, { action: "status" }).catch(() => undefined) as ExtensionState | undefined : undefined;
-  if (initialVersion === interactionVersion) render(result);
+  const state = tabId ? await chrome.tabs.sendMessage(tabId, { action: "status" }).catch(() => undefined) as ExtensionState | undefined : undefined;
+  render(state);
 });
