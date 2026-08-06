@@ -29,11 +29,15 @@ export class AudioScheduler {
     video.addEventListener("ratechange", this.onRateChange);
   }
 
-  setSourceVolume(value: number): void { this.sourceVolume = value; }
+  setSourceVolume(value: number): void {
+    this.sourceVolume = value;
+    if (this.frame) this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
+  }
   add(segment: SubtitleSegment, blob: Blob): void { this.items.set(segment.id, { segment, url: URL.createObjectURL(blob) }); }
 
   start(): void {
     this.stopLoop();
+    this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
     const tick = (): void => {
       const now = this.video.currentTime * 1000;
       for (const { segment } of this.items.values()) {
@@ -60,7 +64,6 @@ export class AudioScheduler {
       audio.playbackRate = Math.min(1.3, Math.max(0.85, baseRate * this.video.playbackRate));
     }, { once: true });
     audio.dataset.endMs = String(item.segment.endMs);
-    this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
     audio.addEventListener("ended", () => this.finishActive(), { once: true });
     void audio.play().catch(() => this.stopActive());
     this.active = { id: item.segment.id, audio };
@@ -70,7 +73,6 @@ export class AudioScheduler {
     if (!this.active) return;
     this.active.audio.pause();
     this.active = undefined;
-    this.video.volume = this.originalVolume;
   }
 
   private finishActive(): void { if (this.active) this.played.add(this.active.id); this.stopActive(); }
@@ -87,6 +89,7 @@ export class AudioScheduler {
   stopLoop(): void { if (this.frame) cancelAnimationFrame(this.frame); this.frame = 0; this.stopActive(); }
   clear(): void {
     this.stopLoop();
+    this.video.volume = this.originalVolume;
     this.video.removeEventListener("pause", this.onPause); this.video.removeEventListener("play", this.onResume);
     this.video.removeEventListener("seeking", this.onSeek); this.video.removeEventListener("ratechange", this.onRateChange);
     for (const item of this.items.values()) URL.revokeObjectURL(item.url);

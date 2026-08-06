@@ -24,7 +24,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x, bỏ qua câu đến trễ quá 800 ms thay vì đọc đuổi và resync khi vượt khung quá 3 giây.
 - Khi tab YouTube bị ẩn, video được pause ngay và dubbing pause theo; service worker còn theo dõi focus cấp cửa sổ để pause mọi tab YouTube đang dubbing khi người dùng chuyển từ Chrome sang ứng dụng khác như VS Code. Khi quay lại không tự phát tiếp.
 - Lập lịch theo `video.currentTime`; xử lý pause/resume, seek, playback rate và chuyển video.
-- Giảm âm lượng video gốc trong khi audio Việt phát và khôi phục khi dừng.
+- Âm lượng gốc được giữ ổn định ở mức đã chọn trong toàn bộ phiên dubbing, không tăng lại giữa các câu; chỉ khôi phục khi dừng phiên hoặc chuyển video.
 - Backend có Zod validation, giới hạn payload, rate limit cơ bản, timeout, retry/backoff và lỗi JSON có cấu trúc.
 - Có server `npm run dev:api` để kiểm thử local mà không cần đăng nhập Vercel.
 - Server local ghi phương thức, endpoint, mã trạng thái và thời gian xử lý; không ghi payload hay API key.
