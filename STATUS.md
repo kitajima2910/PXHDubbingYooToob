@@ -1,5 +1,15 @@
 # Trạng thái PXHDubbingYooToob
 
+## Kế hoạch tiếp tục 2026-08-08
+
+- Cải thiện Bước 1 nhưng giữ nguyên phần đang hoạt động: ưu tiên transcript DOM, loại tuyệt đối timestamp khỏi nội dung đọc, giảm bỏ/lặp câu và tinh chỉnh đồng bộ TTS với video.
+- Làm Bước 2: cache transcript và bản dịch trong Neon theo `videoId`/ngôn ngữ để cùng một video không phải nhận dạng và dịch lại.
+- Luồng mục tiêu: `Transcript DOM → Groq Whisper khi không có transcript → cache Neon → Groq dịch → Chrome TTS`.
+- AssemblyAI không còn là provider mặc định; giữ code hiện có ở chế độ tùy chọn trong lúc chuyển đổi để tránh làm hỏng fallback đang chạy.
+- Không tải model về máy người dùng. Extension vẫn theo trải nghiệm cài đặt rồi dùng; video không có transcript sẽ xử lý qua backend Groq.
+- Quota: ưu tiên Groq key riêng nếu người dùng đã lưu; nếu không thì dùng key mặc định có giới hạn. Không xoay vòng nhiều key free.
+- Verify sau khi hoàn thành: `npm run check`, toàn bộ test, production build và test Chrome end-to-end cho cả video có transcript lẫn video không có transcript.
+
 > AssemblyAI/Chrome TTS 2026-08-07: thêm `/api/assemblyai/token` để Vercel cấp token streaming 60 giây mà không lộ master key; offscreen gửi PCM16 trực tiếp tới `whisper-rt`, chỉ xử lý Turn finalized và ánh xạ timestamp về `video.currentTime`. Video không transcript ưu tiên `AssemblyAI — realtime`, tự fallback Groq Whisper 5 giây nếu token/WebSocket lỗi. Scheduler ưu tiên giọng Việt miễn phí qua `chrome.tts`, máy không có voice `vi` vẫn dùng Edge TTS Hoài My. Manifest thêm quyền `tts` và host AssemblyAI.
 > Verify AssemblyAI/Chrome TTS: endpoint local đã cấp token thật thành công; `npm run check`, 9/9 test và production build đều đạt. Chưa kiểm thử phát âm thanh tương tác trong Chrome; cần deploy endpoint mới lên Vercel rồi reload extension để kiểm thử end-to-end.
 > Production backend 2026-08-07: Vercel trả CORS đúng cho extension ID phát triển; `OPTIONS /api/assemblyai/token` 204, `POST /api/assemblyai/token` 200 với token 60 giây, `/api/translate` 200 và `/api/tts` 200 audio MPEG. Route `/` trả 404 đúng thiết kế vì backend chỉ cung cấp các API route.
