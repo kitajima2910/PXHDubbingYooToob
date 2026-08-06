@@ -1,12 +1,5 @@
 import { YoutubeTranscript } from "youtube-transcript";
 
-async function pauseYouTubeTabs(): Promise<void> {
-  const tabs = await chrome.tabs.query({ url: "https://www.youtube.com/watch*" });
-  await Promise.all(tabs.flatMap((tab) => tab.id === undefined
-    ? []
-    : [chrome.tabs.sendMessage(tab.id, { action: "pause-window" }).catch(() => undefined)]));
-}
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe"]);
 const requests = new Map<string, AbortController>();
@@ -109,7 +102,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "capture-start") {
     const targetTabId = request.tabId ?? sender.tab?.id;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
-    void startTabCapture(targetTabId, request.sourceVolume ?? 0.25).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
+    void startTabCapture(targetTabId, request.sourceVolume ?? 0.18).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
   if (request?.action === "capture-stop") { void stopTabCapture().then(() => respond({ ok: true })); return true; }
@@ -151,8 +144,4 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     .then(respond)
     .finally(() => requests.delete(key));
   return true;
-});
-
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) void pauseYouTubeTabs();
 });

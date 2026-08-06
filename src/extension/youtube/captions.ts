@@ -7,7 +7,7 @@ interface BridgePayload { text: string; format: "json3" | "xml" | "segments"; so
 function loadFromPageWorld(): Promise<BridgePayload> {
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, 20_000);
+    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, 12_000);
     const onMessage = (event: MessageEvent<unknown>): void => {
       if (event.source !== window) return;
       const message = event.data as { type?: string; requestId?: string; payload?: BridgePayload; error?: string } | null;

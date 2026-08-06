@@ -162,7 +162,7 @@ async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!transcriptButton) return undefined;
-  for (let attempt = 0; attempt < 70; attempt += 1) {
+  for (let attempt = 0; attempt < 35; attempt += 1) {
     segments = transcriptSegmentsFromDom();
     if (segments.length) {
       hideTranscriptPanel();
@@ -214,7 +214,7 @@ async function transcriptPayload(track?: PageCaptionTrack): Promise<CaptionPaylo
 
 async function captionPayload(): Promise<CaptionPayload> {
   let response: PagePlayerResponse | undefined;
-  for (let attempt = 0; attempt < 20 && !response; attempt += 1) {
+  for (let attempt = 0; attempt < 8 && !response; attempt += 1) {
     response = playerResponse();
     if (!response) await new Promise((resolve) => setTimeout(resolve, 250));
   }

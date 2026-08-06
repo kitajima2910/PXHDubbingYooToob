@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
     targetTabId = request.tabId;
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
-    const gain = audioContext.createGain(); gain.gain.value = Math.max(0, Math.min(1, request.sourceVolume ?? 0.25));
+    const gain = audioContext.createGain(); gain.gain.value = Math.max(0, Math.min(1, request.sourceVolume ?? 0.18));
     source.connect(gain).connect(audioContext.destination);
     recordChunk();
     return { ok: true };

@@ -1,10 +1,11 @@
 # Trạng thái PXHDubbingYooToob
 
-> UI 2026-08-06: chuyển Start/Stop sang nút Play nổi cố định giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup bỏ toàn bộ nút hành động, đổi tiêu đề thành `PXH Dubbing YooToob`, thiết kế dark card và chỉ giữ status/settings tự lưu bằng `chrome.storage.local`. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
+> UI 2026-08-06: chuyển Start/Stop sang nút Play nổi 44 px ở giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup `PXH Dubbing YooToob` chỉ hiển thị trạng thái/thông tin, không còn nút hay settings. Dùng cấu hình cố định độ trễ Whisper 6 giây và âm gốc 18%. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
 > Giảm cold-start Whisper: giữ chunk audio 5 giây gần nhất trong lúc dò caption và xử lý ngay khi fallback được xác nhận, thay vì bỏ chunk đầu rồi chờ thêm 5 giây.
 > Dùng `public/PXH.jpg` làm logo popup và icon extension/action; asset được Vite sao chép nguyên vẹn vào production build.
+> Chrome không render ổn định JPEG trong Manifest icon; xuất từ `PXH.jpg` thành PNG chuẩn 16/32/48/128 px trong `public/icons` và chuyển `icons/default_icon` sang bộ PNG.
 
-> Upgrade Whisper 2026-08-06: thêm `tabCapture` + offscreen MediaRecorder tạo WebM/Opus 5 giây, `/api/transcribe` dùng `whisper-large-v3-turbo`, fallback tự động khi cả transcript trang và backend đều thất bại, hàng đợi nhận dạng → dịch → Hoài My TTS, dừng capture khi caption hoạt động/dừng tab/mất focus. API key chỉ nằm backend. Smoke test Groq thật trả đúng text và timestamp; check, 8/8 test và production build đạt.
+> Upgrade Whisper 2026-08-06: thêm `tabCapture` + offscreen MediaRecorder tạo WebM/Opus 5 giây, `/api/transcribe` dùng `whisper-large-v3-turbo`, fallback tự động khi cả transcript trang và backend đều thất bại, hàng đợi nhận dạng → dịch → Hoài My TTS, dừng capture khi caption hoạt động hoặc người dùng dừng dubbing. Mở popup/chuyển focus không còn pause video. API key chỉ nằm backend. Smoke test Groq thật trả đúng text và timestamp; check, 8/8 test và production build đạt.
 > Manifest yêu cầu Chrome 116+ vì stream ID tạo trong service worker chỉ được dùng ở offscreen document từ phiên bản này.
 
 > Cập nhật 2026-08-06: Bổ sung fallback lấy transcript trong MAIN world qua YouTube `youtubei/v1/get_transcript`; nếu trang chưa có `params`, lấy qua `youtubei/v1/next`. Extension parse trực tiếp các `transcriptSegmentRenderer`, tránh trường hợp timedtext và fallback service worker trả mảng rỗng. Đã chạy `npm run check`, 8/8 test và production build thành công.
@@ -84,3 +85,4 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Production API calls được chuyển từ content script sang extension service worker theo hướng dẫn Chrome, với allowlist ba endpoint và hủy request; `.env.production` cố định public Vercel URL và Manifest chỉ cấp quyền cho đúng domain production.
 - Kiểm tra production với extension ID phát triển: CORS đạt, translate/TTS trả 200; transcript trên Vercel trả 502 do phía YouTube/datacenter. Fallback transcript vì vậy chạy trong service worker bằng IP người xem, vẫn chỉ nhận `videoId` hợp lệ; Vercel giữ dịch và TTS.
 - Service worker tự phát hiện transcript timestamp theo giây hay milliseconds bằng median duration, chuẩn hóa trước khi lọc cửa sổ và thử đơn vị còn lại nếu vùng kết quả rỗng.
+> Xác minh UI/đồng bộ mới nhất: rút ngắn timeout bridge 20 → 12 giây, thời gian chờ player response 5 → 2 giây và chờ transcript UI 7 → 3,5 giây; `npm run check`, 8/8 test và production build đều đạt.

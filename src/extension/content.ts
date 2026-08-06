@@ -15,6 +15,8 @@ let whisperQueue: Promise<void> = Promise.resolve();
 let pendingWhisperChunk: { audioBase64: string; mimeType: string } | undefined;
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
+const DEFAULT_DELAY_SECONDS = 6;
+const DEFAULT_SOURCE_VOLUME = 0.18;
 
 function takePendingWhisperChunk(): { audioBase64: string; mimeType: string } | undefined {
   const chunk = pendingWhisperChunk;
@@ -45,10 +47,10 @@ function createFloatingControl(): void {
   host.id = "pxh-dubbing-control";
   const shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `<style>
-    :host{all:initial}.wrap{position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:2147483647;display:flex;align-items:center;gap:9px;font:600 12px system-ui,sans-serif}
-    button{width:58px;height:58px;border:1px solid #ffffff38;border-radius:50%;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#ff3048,#c50021);box-shadow:0 10px 30px #0008,0 0 0 5px #e7193720;cursor:pointer;transition:transform .18s,box-shadow .18s,filter .18s}
+    :host{all:initial}.wrap{position:fixed;left:12px;top:50%;transform:translateY(-50%);z-index:2147483647;display:flex;align-items:center;gap:8px;font:600 12px system-ui,sans-serif}
+    button{width:44px;height:44px;border:1px solid #ffffff38;border-radius:50%;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#ff3048,#c50021);box-shadow:0 8px 24px #0008,0 0 0 4px #e7193720;cursor:pointer;transition:transform .18s,box-shadow .18s,filter .18s}
     button:hover{transform:scale(1.07);box-shadow:0 12px 34px #0009,0 0 0 7px #e7193728}button:active{transform:scale(.96)}button[data-active="true"]{background:linear-gradient(145deg,#2a303b,#11141a)}button[data-error="true"]{background:linear-gradient(145deg,#ff6b35,#c92b19)}
-    svg{width:26px;height:26px;fill:currentColor}.spinner{width:22px;height:22px;border:3px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}.hint{padding:8px 11px;border:1px solid #ffffff18;border-radius:9px;color:#fff;background:#11141aeb;box-shadow:0 6px 20px #0006;opacity:0;transform:translateX(-5px);pointer-events:none;transition:.18s;white-space:nowrap}.wrap:hover .hint{opacity:1;transform:none}@keyframes spin{to{transform:rotate(360deg)}}
+    svg{width:20px;height:20px;fill:currentColor}.spinner{width:17px;height:17px;border:2px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}.hint{padding:7px 10px;border:1px solid #ffffff18;border-radius:8px;color:#fff;background:#11141aeb;box-shadow:0 6px 20px #0006;opacity:0;transform:translateX(-5px);pointer-events:none;transition:.18s;white-space:nowrap}.wrap:hover .hint{opacity:1;transform:none}@keyframes spin{to{transform:rotate(360deg)}}
   </style><div class="wrap"><button type="button"></button><span class="hint">PXH Dubbing</span></div>`;
   floatingButton = shadow.querySelector<HTMLButtonElement>("button")!;
   floatingButton.addEventListener("click", () => { void toggleFromFloatingButton(); });
@@ -61,9 +63,8 @@ async function toggleFromFloatingButton(): Promise<void> {
   floatingBusy = true; renderFloatingButton();
   try {
     if (state.enabled) { await stop(); return; }
-    const stored = await chrome.storage.local.get({ delaySeconds: 5, sourceVolume: 0.25 });
-    const delaySeconds = Number(stored.delaySeconds);
-    const sourceVolume = Number(stored.sourceVolume);
+    const delaySeconds = DEFAULT_DELAY_SECONDS;
+    const sourceVolume = DEFAULT_SOURCE_VOLUME;
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", sourceVolume }) as { ok?: boolean; message?: string };
     const captureReady = capture?.ok === true;
     const result = await start(delaySeconds, sourceVolume);
@@ -242,18 +243,8 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-function pauseForLostFocus(): ExtensionState {
-  if (!state.enabled) return state;
-  const video = document.querySelector<HTMLVideoElement>("video");
-  if (video && !video.paused) video.pause();
-  if (whisperMode) void chrome.runtime.sendMessage({ action: "capture-stop" });
-  update({ status: "ready", message: "Đã tạm dừng vì Chrome không hoạt động" });
-  return state;
-}
-
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
-  if (request.action === "pause-window") { respond(pauseForLostFocus()); return; }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
     if (controller && chunk.audioBase64 && chunk.mimeType) {
@@ -263,15 +254,11 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
     }
     respond({ ok: true }); return;
   }
-  const operation = request.action === "stop" ? stop() : start(request.delaySeconds ?? 5, request.sourceVolume ?? 0.25);
+  const operation = request.action === "stop" ? stop() : start(request.delaySeconds ?? DEFAULT_DELAY_SECONDS, request.sourceVolume ?? DEFAULT_SOURCE_VOLUME);
   void operation.then(respond);
   return true;
 });
 
 setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
-
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) pauseForLostFocus();
-});
 
 createFloatingControl();
