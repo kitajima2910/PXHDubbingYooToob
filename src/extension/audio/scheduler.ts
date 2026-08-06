@@ -20,9 +20,11 @@ export class AudioScheduler {
   private readonly played = new Set<string>();
   private frame = 0;
   private originalVolume: number;
+  private lastTimelineMs: number;
 
   constructor(private readonly video: HTMLVideoElement, private sourceVolume: number) {
     this.originalVolume = video.volume;
+    this.lastTimelineMs = video.currentTime * 1000;
     video.addEventListener("pause", this.onPause);
     video.addEventListener("play", this.onResume);
     video.addEventListener("seeking", this.onSeek);
@@ -56,6 +58,7 @@ export class AudioScheduler {
           && !this.played.has(segment.id))
         .sort((left, right) => left.segment.startMs - right.segment.startMs)[0] : undefined;
       if (match && !this.video.paused) this.play(match);
+      this.lastTimelineMs = now;
       this.frame = requestAnimationFrame(tick);
     };
     this.frame = requestAnimationFrame(tick);
@@ -112,7 +115,16 @@ export class AudioScheduler {
     if (this.active?.audio) void this.active.audio.play().catch(() => this.stopActive());
     else if (this.active?.chromeTts) void chrome.runtime.sendMessage({ action: "tts-resume" });
   };
-  private readonly onSeek = (): void => { this.stopActive(); this.played.clear(); };
+  private readonly onSeek = (): void => {
+    this.stopActive();
+    const targetMs = this.video.currentTime * 1000;
+    const seekingBackward = targetMs < this.lastTimelineMs - 750;
+    for (const { segment } of this.items.values()) {
+      if (seekingBackward && segment.startMs >= targetMs - 250) this.played.delete(segment.id);
+      else if (segment.startMs < targetMs - 250) this.played.add(segment.id);
+    }
+    this.lastTimelineMs = targetMs;
+  };
   private readonly onRateChange = (): void => {
     if (this.active?.audio) {
       const baseRate = Number(this.active.audio.dataset.baseRate ?? 1);

@@ -108,22 +108,55 @@ function timestampMs(text: string): number | undefined {
   return Math.round(parts.reduce((total, part) => total * 60 + part, 0) * 1000);
 }
 
-function removeTranscriptTimestamps(text: string): string {
-  return text.replace(/(^|\s)\d{1,2}(?:[:.：]\d{2}){1,2}(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+function stripTranscriptTimestamps(text: string, knownTimestamp = ""): string {
+  let cleaned = text;
+  const known = knownTimestamp.replace(/\s+/g, " ").trim();
+  if (known) {
+    const escaped = known.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    cleaned = cleaned.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "g"), "$1");
+  }
+  return cleaned
+    .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function hideTranscriptPanel(): void {
-  const panel = document.querySelector<HTMLElement>("ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']");
+  const styleId = "pxh-hide-youtube-transcript";
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      ytd-engagement-panel-section-list-renderer[target-id*="transcript"],
+      yt-engagement-panel-section-list-renderer[target-id*="transcript"],
+      ytd-engagement-panel-section-list-renderer:has(ytd-transcript-renderer),
+      ytd-engagement-panel-section-list-renderer:has(ytd-transcript-search-panel-renderer),
+      ytd-engagement-panel-section-list-renderer:has(transcript-segment-view-model),
+      yt-engagement-panel-section-list-renderer:has(transcript-segment-view-model) {
+        width: 0 !important; height: 0 !important; min-width: 0 !important; min-height: 0 !important;
+        max-width: 0 !important; max-height: 0 !important; overflow: hidden !important;
+        opacity: 0 !important; visibility: hidden !important; pointer-events: none !important;
+        position: fixed !important; left: -100000px !important; top: 0 !important; contain: strict !important;
+      }
+    `;
+    document.documentElement.append(style);
+  }
+  const transcriptContent = document.querySelector<HTMLElement>(
+    "ytd-transcript-renderer, ytd-transcript-search-panel-renderer, transcript-segment-view-model, ytd-transcript-segment-renderer",
+  );
+  const panel = document.querySelector<HTMLElement>("[target-id*='transcript']")
+    ?? transcriptContent?.closest<HTMLElement>("ytd-engagement-panel-section-list-renderer, yt-engagement-panel-section-list-renderer")
+    ?? transcriptContent;
   if (!panel) return;
-  // Giữ transcript trong DOM để tiếp tục đọc mà không chiếm diện tích giao diện.
+  // Keep transcript readable in the DOM while removing its visual layout.
   for (const [property, value] of Object.entries({
     width: "0px", height: "0px", minWidth: "0px", minHeight: "0px", maxWidth: "0px", maxHeight: "0px",
-    overflow: "hidden", opacity: "0", pointerEvents: "none", position: "absolute",
+    overflow: "hidden", opacity: "0", visibility: "hidden", pointerEvents: "none", position: "fixed", left: "-100000px",
   })) panel.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value, "important");
 }
 
 function transcriptSegmentsFromDom(): TranscriptSegment[] {
-  const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model")];
+  const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model, yt-transcript-segment-view-model")];
   const segments = rows.flatMap((row, index) => {
     const attributedStrings = [...row.querySelectorAll<HTMLElement>(".yt-core-attributed-string")]
       .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -133,7 +166,8 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
       ?? rawText.match(/^\d{1,2}(?:[:.：]\d{2}){1,2}/)?.[0]
       ?? "";
     const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
-    const sourceText = removeTranscriptTimestamps(directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length));
+    const candidateText = directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText;
+    const sourceText = stripTranscriptTimestamps(candidateText, timeText);
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];

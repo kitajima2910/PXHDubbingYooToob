@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchSegments, mapTranslations, mergeOverlappingSegments, selectUpcomingSegments } from "../src/shared/segments";
+import { batchSegments, mapTranslations, mergeOverlappingSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../src/shared/segments";
 import type { SubtitleSegment } from "../src/shared/types";
 
 const segments: SubtitleSegment[] = [
@@ -35,5 +35,11 @@ describe("xử lý đoạn phụ đề", () => {
     expect(result[0]?.sourceText).toBe("Welcome to Cloud Wizard. In this video we dive into recommendation systems.");
     expect(result[0]?.endMs).toBe(result[1]?.startMs);
     expect(result.map((item) => item.sourceText).join(" ")).toContain("They power your feed.");
+  });
+
+  it("loại timestamp transcript dùng dấu hai chấm, dấu chấm và timestamp đã biết", () => {
+    expect(stripTranscriptTimestamps("0:42 super useful", "0:42")).toBe("super useful");
+    expect(stripTranscriptTimestamps("0.51 this will be useful")).toBe("this will be useful");
+    expect(stripTranscriptTimestamps("Text 1：02 tiếp theo")).toBe("Text tiếp theo");
   });
 });

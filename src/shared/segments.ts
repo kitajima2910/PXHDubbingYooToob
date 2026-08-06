@@ -1,5 +1,18 @@
 import type { SubtitleSegment } from "./types.js";
 
+export function stripTranscriptTimestamps(text: string, knownTimestamp = ""): string {
+  let cleaned = text;
+  const known = knownTimestamp.replace(/\s+/g, " ").trim();
+  if (known) {
+    const escaped = known.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    cleaned = cleaned.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "g"), "$1");
+  }
+  return cleaned
+    .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function batchSegments(segments: SubtitleSegment[], size = 8): SubtitleSegment[][] {
   if (!Number.isInteger(size) || size < 1) throw new Error("Kích thước batch phải là số nguyên dương");
   const batches: SubtitleSegment[][] = [];

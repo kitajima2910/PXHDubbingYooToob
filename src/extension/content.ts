@@ -21,6 +21,7 @@ let assemblySessionStartMs = 0;
 let assemblyProcessing = false;
 let assemblyQueue: AssemblyTurn[] = [];
 let assemblyTurns = new Set<number>();
+let recentAssemblyTexts: Array<{ text: string; expiresAt: number }> = [];
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 const DEFAULT_DELAY_SECONDS = 5;
@@ -61,6 +62,24 @@ function isDubbingFeedback(text: string): boolean {
   recentDubbingTexts = recentDubbingTexts.filter((item) => item.expiresAt > now);
   return recentDubbingTexts.some((item) => item.text === fingerprint
     || (Math.min(item.text.length, fingerprint.length) >= 14 && (item.text.includes(fingerprint) || fingerprint.includes(item.text))));
+}
+
+function isRepeatedAssemblyText(text: string): boolean {
+  const fingerprint = speechFingerprint(text);
+  if (fingerprint.length < 6) return false;
+  const now = Date.now();
+  recentAssemblyTexts = recentAssemblyTexts.filter((item) => item.expiresAt > now);
+  const repeated = recentAssemblyTexts.some((item) => {
+    if (item.text === fingerprint) return true;
+    const shorter = item.text.length <= fingerprint.length ? item.text : fingerprint;
+    const longer = item.text.length > fingerprint.length ? item.text : fingerprint;
+    return shorter.length >= 24 && shorter.length / longer.length >= 0.8 && longer.includes(shorter);
+  });
+  if (!repeated) {
+    recentAssemblyTexts.push({ text: fingerprint, expiresAt: now + 30_000 });
+    if (recentAssemblyTexts.length > 30) recentAssemblyTexts.splice(0, recentAssemblyTexts.length - 30);
+  }
+  return repeated;
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -203,7 +222,7 @@ function drainAssemblyQueue(signal: AbortSignal): void {
 }
 
 function queueAssemblyTurn(turn: AssemblyTurn, signal: AbortSignal): void {
-  if (assemblyTurns.has(turn.turnOrder)) return;
+  if (assemblyTurns.has(turn.turnOrder) || isRepeatedAssemblyText(turn.text)) return;
   assemblyTurns.add(turn.turnOrder);
   assemblyQueue.push(turn);
   drainAssemblyQueue(signal);
@@ -289,6 +308,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
   whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   assemblyMode = false; assemblySessionStartMs = 0; assemblyProcessing = false; assemblyQueue = []; assemblyTurns = new Set<number>();
+  recentAssemblyTexts = [];
   recentDubbingTexts = [];
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
@@ -353,6 +373,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
   assemblyMode = false; assemblyProcessing = false; assemblyQueue = []; assemblyTurns.clear();
+  recentAssemblyTexts = [];
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });

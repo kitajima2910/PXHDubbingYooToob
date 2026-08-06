@@ -1,5 +1,5 @@
 import type { SubtitleSegment } from "../../shared/types";
-import { mergeOverlappingSegments } from "../../shared/segments";
+import { mergeOverlappingSegments, stripTranscriptTimestamps } from "../../shared/segments";
 
 interface CaptionTrack { baseUrl: string; languageCode: string; kind?: string }
 interface BridgePayload { text: string; format: "json3" | "xml" | "segments"; source: string }
@@ -102,10 +102,6 @@ function decodeEntities(text: string): string {
   return element.value.replace(/\s+/g, " ").trim();
 }
 
-function removeTranscriptTimestamps(text: string): string {
-  return text.replace(/(^|\s)\d{1,2}(?:[:.：]\d{2}){1,2}(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
-}
-
 export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment[]; source: string }> {
   let data: Json3CaptionData;
   let source: string;
@@ -114,7 +110,7 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
     if (payload.format === "segments") {
       const parsed = JSON.parse(payload.text) as { segments?: SubtitleSegment[] };
       const segments = (parsed.segments ?? [])
-        .map((segment) => ({ ...segment, sourceText: removeTranscriptTimestamps(segment.sourceText) }))
+        .map((segment) => ({ ...segment, sourceText: stripTranscriptTimestamps(segment.sourceText) }))
         .filter((segment) => Number.isFinite(segment.startMs) && Number.isFinite(segment.endMs) && typeof segment.sourceText === "string" && segment.sourceText.trim());
       if (!segments.length) throw new Error("Transcript YouTube không có nội dung");
       // DOM transcript rows already carry YouTube's timeline. Preserve each cue
@@ -143,7 +139,7 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
     }
   }
   const segments = (data.events ?? []).flatMap((event, index) => {
-    const sourceText = removeTranscriptTimestamps(decodeEntities((event.segs ?? []).map((part) => part.utf8 ?? "").join("")));
+    const sourceText = stripTranscriptTimestamps(decodeEntities((event.segs ?? []).map((part) => part.utf8 ?? "").join("")));
     const startMs = event.tStartMs ?? 0;
     if (!sourceText) return [];
     return [{ id: `${startMs}-${index}`, startMs, endMs: startMs + (event.dDurationMs ?? 2000), sourceText }];
