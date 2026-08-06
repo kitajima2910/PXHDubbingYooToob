@@ -124,13 +124,23 @@ async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
   let segments = transcriptSegmentsFromDom();
   if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
 
-  const expander = document.querySelector<HTMLElement>("ytd-watch-metadata ytd-text-inline-expander #expand");
+  const expander = document.querySelector<HTMLElement>(
+    "ytd-watch-metadata #description-inline-expander #expand, ytd-watch-metadata ytd-text-inline-expander #expand, ytd-watch-metadata tp-yt-paper-button#expand",
+  );
   expander?.click();
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const button = document.querySelector<HTMLElement>("ytd-video-description-transcript-section-renderer button");
-    if (button) { button.click(); break; }
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  let transcriptButton: HTMLElement | undefined;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const sectionButton = document.querySelector<HTMLElement>(
+      "ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer tp-yt-paper-button, ytd-video-description-transcript-section-renderer yt-button-shape button",
+    );
+    const textButton = [...document.querySelectorAll<HTMLElement>("ytd-watch-metadata button, ytd-watch-metadata tp-yt-paper-button")]
+      .find((element) => /(?:show|open) transcript|transcript|hiện bản chép lời|bản chép lời|bản chép lại/i.test(`${element.textContent ?? ""} ${element.getAttribute("aria-label") ?? ""}`));
+    const button = sectionButton ?? textButton;
+    if (button) { transcriptButton = button; button.click(); break; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  if (!transcriptButton) return undefined;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     segments = transcriptSegmentsFromDom();
     if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
@@ -170,7 +180,7 @@ async function transcriptPayload(track?: PageCaptionTrack): Promise<CaptionPaylo
   });
   if (!transcriptResponse.ok) {
     const detail = (await transcriptResponse.text()).slice(0, 300).replace(/\s+/g, " ").trim();
-    throw new Error(`YouTube transcript trả HTTP ${transcriptResponse.status}${detail ? `: ${detail}` : ""}`);
+    throw new Error(`Không lấy được transcript từ giao diện; API trả HTTP ${transcriptResponse.status}${detail ? `: ${detail}` : ""}`);
   }
   const segments: TranscriptSegment[] = [];
   collectTranscriptSegments(await transcriptResponse.json(), segments);

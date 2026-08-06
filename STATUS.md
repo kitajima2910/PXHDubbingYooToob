@@ -7,6 +7,7 @@
 > Sửa `FAILED_PRECONDITION`: giữ `clickTrackingParams` đi cùng `getTranscriptEndpoint`, đưa vào `context.clickTracking` và thêm `x-goog-api-format-version: 2` giống request InnerTube của YouTube.
 > Thay params phụ thuộc UI bằng protobuf transcript tự tạo từ video ID, language code và loại ASR của caption track; bỏ request `next` khỏi đường chính để giảm thời gian đứng ở “Đang tải phụ đề”.
 > Do YouTube vẫn bắt buộc PO token và trả `FAILED_PRECONDITION`, thêm fallback dùng nút Transcript chính thức của trang và parse `ytd-transcript-segment-renderer`; YouTube tự gắn token hợp lệ cho request UI.
+> Mở rộng nhận diện UI Transcript cho DOM YouTube mới và nhãn tiếng Việt/Anh; hỗ trợ `button`, `tp-yt-paper-button`, `yt-button-shape`, đồng thời báo rõ khi UI không tải được transcript.
 
 Cập nhật: 2026-08-06
 
