@@ -120,7 +120,8 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
       ?? "";
     const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
     const sourceText = (directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length))
-      .replace(/\s+/g, " ").trim();
+      .replace(/\s+/g, " ").trim()
+      .replace(/^\d{1,2}(?::\d{2}){1,2}\s*/, "").trim();
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];
