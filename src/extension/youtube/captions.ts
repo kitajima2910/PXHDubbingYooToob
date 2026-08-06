@@ -1,4 +1,5 @@
 import type { SubtitleSegment } from "../../shared/types";
+import { mergeOverlappingSegments } from "../../shared/segments";
 
 interface CaptionTrack { baseUrl: string; languageCode: string; kind?: string }
 interface BridgePayload { text: string; format: "json3" | "xml"; source: string }
@@ -122,5 +123,5 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
     return [{ id: `${startMs}-${index}`, startMs, endMs: startMs + (event.dDurationMs ?? 2000), sourceText }];
   });
   if (!segments.length) throw new Error("Phụ đề YouTube không có nội dung");
-  return { segments, source };
+  return { segments: mergeOverlappingSegments(segments), source };
 }

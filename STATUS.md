@@ -16,6 +16,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Parser phụ đề đọc an toàn và fallback XML khi YouTube trả JSON3 rỗng/không hợp lệ.
 - Thêm content script `MAIN` làm cầu nối giới hạn với YouTube player API; không nhận URL tùy ý và không truy cập khóa backend.
 - Thêm fallback `/api/subtitles/youtube` dùng Android player context khi WEB timedtext yêu cầu PO token; endpoint chỉ nhận `videoId` 11 ký tự và cửa sổ tối đa 120 giây.
+- Chuẩn hóa phụ đề tự động bị chồng timestamp: ghép đủ mọi fragment thành cụm 6–10 giây, ưu tiên ranh giới dấu câu và tạo timestamp không chồng lấn trước khi dịch/TTS.
 - Dịch theo batch qua backend Groq và giữ ánh xạ ID.
 - Tạo MP3 theo từng câu qua provider Edge TTS, giọng mặc định `vi-VN-HoaiMyNeural`.
 - TTS chạy tối đa 3 request đồng thời; scheduler bật trước và popup chuyển sang “Sẵn sàng” ngay khi audio đầu tiên vào bộ đệm, phần còn lại tiếp tục tạo nền.
@@ -33,7 +34,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 ## Xác minh
 
 - `npm run check`: đạt.
-- `npm test`: đạt, 7 test.
+- `npm test`: đạt, 8 test.
 - `npm run build`: đạt; tạo `dist/manifest.json`, popup và content script.
 - `.env.local` có `GROQ_API_KEY` và được xác minh bị Git bỏ qua.
 - Smoke test dịch vụ thật: Groq kết nối thành công; Edge TTS `vi-VN-HoaiMyNeural` tạo MP3 thành công (14.688 byte).

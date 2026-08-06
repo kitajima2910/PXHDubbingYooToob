@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchSegments, mapTranslations, selectUpcomingSegments } from "../src/shared/segments";
+import { batchSegments, mapTranslations, mergeOverlappingSegments, selectUpcomingSegments } from "../src/shared/segments";
 import type { SubtitleSegment } from "../src/shared/types";
 
 const segments: SubtitleSegment[] = [
@@ -22,5 +22,18 @@ describe("xử lý đoạn phụ đề", () => {
   it("chọn cửa sổ sắp phát và loại đoạn đã xếp hàng", () => {
     const result = selectUpcomingSegments(segments, 900, 1_200, new Set(["b"]));
     expect(result.map((item) => item.id)).toEqual(["a", "c"]);
+  });
+
+  it("ghép caption chồng lấn mà không làm mất từ", () => {
+    const overlapping: SubtitleSegment[] = [
+      { id: "1", startMs: 0, endMs: 4_680, sourceText: "Welcome to Cloud Wizard." },
+      { id: "2", startMs: 2_880, endMs: 7_120, sourceText: "In this video we dive" },
+      { id: "3", startMs: 4_680, endMs: 9_440, sourceText: "into recommendation systems." },
+      { id: "4", startMs: 7_120, endMs: 11_720, sourceText: "They power your feed." },
+    ];
+    const result = mergeOverlappingSegments(overlapping);
+    expect(result[0]?.sourceText).toBe("Welcome to Cloud Wizard. In this video we dive into recommendation systems.");
+    expect(result[0]?.endMs).toBe(result[1]?.startMs);
+    expect(result.map((item) => item.sourceText).join(" ")).toContain("They power your feed.");
   });
 });

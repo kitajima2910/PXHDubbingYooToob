@@ -16,3 +16,38 @@ export function selectUpcomingSegments(segments: SubtitleSegment[], fromMs: numb
   const toMs = fromMs + windowMs;
   return segments.filter((item) => item.endMs >= fromMs && item.startMs <= toMs && !queued.has(item.id)).slice(0, limit);
 }
+
+export function mergeOverlappingSegments(segments: SubtitleSegment[], targetSpanMs = 6_000, maxCharacters = 180): SubtitleSegment[] {
+  const sorted = [...segments].sort((left, right) => left.startMs - right.startMs);
+  const merged: SubtitleSegment[] = [];
+  let group: SubtitleSegment[] = [];
+
+  const flush = (nextStartMs?: number): void => {
+    const first = group[0];
+    const last = group[group.length - 1];
+    if (!first || !last) return;
+    const naturalEnd = Math.max(...group.map((item) => item.endMs));
+    const endMs = Math.max(first.startMs + 500, nextStartMs ?? naturalEnd);
+    merged.push({
+      id: `merged-${first.id}-${last.id}`,
+      startMs: first.startMs,
+      endMs,
+      sourceText: group.map((item) => item.sourceText.trim()).filter(Boolean).join(" ").replace(/\s+/g, " "),
+    });
+    group = [];
+  };
+
+  for (let index = 0; index < sorted.length; index += 1) {
+    const segment = sorted[index]!;
+    const next = sorted[index + 1];
+    group.push(segment);
+    const first = group[0]!;
+    const textLength = group.reduce((total, item) => total + item.sourceText.length + 1, 0);
+    const largeGap = next ? next.startMs - segment.startMs > 3_500 : true;
+    const targetReached = next ? next.startMs - first.startMs >= targetSpanMs : true;
+    const hardSpanReached = next ? next.startMs - first.startMs >= 10_000 : true;
+    const naturalBoundary = /[.!?,;:]\s*$/.test(segment.sourceText);
+    if (!next || largeGap || hardSpanReached || textLength >= maxCharacters || (targetReached && naturalBoundary)) flush(next?.startMs);
+  }
+  return merged.filter((item) => item.sourceText.length > 0);
+}
