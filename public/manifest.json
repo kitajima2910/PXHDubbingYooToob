@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.",
   "permissions": ["storage"],
-  "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://*.vercel.app/*"],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://pxh-dubbing-yoo-toob.vercel.app/*"],
   "action": { "default_popup": "popup.html", "default_title": "PXHDubbingYooToob" },
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
