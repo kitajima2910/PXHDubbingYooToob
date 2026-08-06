@@ -63,6 +63,7 @@ export class AudioScheduler {
     const audio = new Audio(item.url);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
     audio.preload = "auto";
+    audio.volume = 1;
     audio.dataset.baseRate = "1";
     audio.playbackRate = speechPlaybackRate(0, slotDuration, this.video.playbackRate);
     audio.addEventListener("loadedmetadata", () => {

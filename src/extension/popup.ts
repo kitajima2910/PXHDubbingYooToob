@@ -12,7 +12,7 @@ app.innerHTML = `
     <div><span>Nguồn</span><strong id="source">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Độ trễ tự động</span><strong>6 giây</strong></div><div><span>Âm thanh gốc</span><strong>18%</strong></div></section>
+  <section class="config-card"><div><span>Độ trễ tự động</span><strong>6 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <footer>Đóng popup và nhấn Play nổi bên trái video.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;

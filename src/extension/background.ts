@@ -112,7 +112,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "capture-start" || request?.action === "capture-prepare") {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
-    const sourceVolume = request.action === "capture-prepare" ? 1 : request.sourceVolume ?? 0.18;
+    const sourceVolume = request.action === "capture-prepare" ? 1 : request.sourceVolume ?? 0.08;
     void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }

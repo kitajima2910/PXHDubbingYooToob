@@ -20,7 +20,7 @@ let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
 const DEFAULT_DELAY_SECONDS = 6;
-const DEFAULT_SOURCE_VOLUME = 0.18;
+const DEFAULT_SOURCE_VOLUME = 0.08;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   const chunk = pendingWhisperChunk;
