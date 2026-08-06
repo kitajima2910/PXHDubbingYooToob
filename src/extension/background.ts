@@ -63,12 +63,17 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
   }
   const fetchWithSignal: typeof globalThis.fetch = (url, init) => globalThis.fetch(url, { ...init, signal });
   const transcript = await YoutubeTranscript.fetchTranscript(input.videoId, { fetch: fetchWithSignal });
-  const segments = mergeTranscriptSegments(transcript.flatMap((item, index) => {
+  const durations = transcript.map((item) => item.duration).filter((duration) => Number.isFinite(duration) && duration > 0).sort((left, right) => left - right);
+  const medianDuration = durations[Math.floor(durations.length / 2)] ?? 0;
+  const detectedScale = medianDuration > 0 && medianDuration < 100 ? 1_000 : 1;
+  const normalize = (scale: number): BackgroundSegment[] => mergeTranscriptSegments(transcript.flatMap((item, index) => {
     const sourceText = item.text.replace(/\s+/g, " ").trim();
     if (!sourceText) return [];
-    const startMs = Math.round(item.offset);
-    return [{ id: `${startMs}-${index}`, startMs, endMs: startMs + Math.max(200, Math.round(item.duration)), sourceText }];
+    const startMs = Math.round(item.offset * scale);
+    return [{ id: `${startMs}-${index}`, startMs, endMs: startMs + Math.max(200, Math.round(item.duration * scale)), sourceText }];
   })).filter((item) => item.endMs >= input.fromMs! && item.startMs <= input.toMs!);
+  let segments = normalize(detectedScale);
+  if (!segments.length) segments = normalize(detectedScale === 1 ? 1_000 : 1);
   if (!segments.length) throw new Error("Không tìm thấy phụ đề trong khoảng đang phát");
   return { segments, source: "YouTube" };
 }

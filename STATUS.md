@@ -1,5 +1,7 @@
 # Trạng thái PXHDubbingYooToob
 
+> Cập nhật 2026-08-06: Bổ sung fallback lấy transcript trong MAIN world qua YouTube `youtubei/v1/get_transcript`; nếu trang chưa có `params`, lấy qua `youtubei/v1/next`. Extension parse trực tiếp các `transcriptSegmentRenderer`, tránh trường hợp timedtext và fallback service worker trả mảng rỗng. Đã chạy `npm run check`, 8/8 test và production build thành công.
+
 Cập nhật: 2026-08-06
 
 ## TARGET hiện tại
@@ -62,3 +64,4 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Backend có thể deploy thành Vercel Functions và extension có thể build trỏ thẳng tới production URL, nhưng chưa production-ready cho phát hành công khai: rate limit còn in-memory, chưa có quota/xác thực người dùng và CORS/extension origin không ngăn client giả mạo gọi API trực tiếp.
 - Production API calls được chuyển từ content script sang extension service worker theo hướng dẫn Chrome, với allowlist ba endpoint và hủy request; `.env.production` cố định public Vercel URL và Manifest chỉ cấp quyền cho đúng domain production.
 - Kiểm tra production với extension ID phát triển: CORS đạt, translate/TTS trả 200; transcript trên Vercel trả 502 do phía YouTube/datacenter. Fallback transcript vì vậy chạy trong service worker bằng IP người xem, vẫn chỉ nhận `videoId` hợp lệ; Vercel giữ dịch và TTS.
+- Service worker tự phát hiện transcript timestamp theo giây hay milliseconds bằng median duration, chuẩn hóa trước khi lọc cửa sổ và thử đơn vị còn lại nếu vùng kết quả rỗng.

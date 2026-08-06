@@ -2,7 +2,7 @@ import type { SubtitleSegment } from "../../shared/types";
 import { mergeOverlappingSegments } from "../../shared/segments";
 
 interface CaptionTrack { baseUrl: string; languageCode: string; kind?: string }
-interface BridgePayload { text: string; format: "json3" | "xml"; source: string }
+interface BridgePayload { text: string; format: "json3" | "xml" | "segments"; source: string }
 
 function loadFromPageWorld(): Promise<BridgePayload> {
   const requestId = crypto.randomUUID();
@@ -107,6 +107,12 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
   let source: string;
   try {
     const payload = await loadFromPageWorld();
+    if (payload.format === "segments") {
+      const parsed = JSON.parse(payload.text) as { segments?: SubtitleSegment[] };
+      const segments = (parsed.segments ?? []).filter((segment) => Number.isFinite(segment.startMs) && Number.isFinite(segment.endMs) && typeof segment.sourceText === "string" && segment.sourceText.trim());
+      if (!segments.length) throw new Error("Transcript YouTube không có nội dung");
+      return { segments: mergeOverlappingSegments(segments), source: payload.source };
+    }
     data = payload.format === "json3" ? (parseJson3(payload.text) ?? {}) : (parseXml(payload.text) ?? {});
     source = payload.source;
   } catch (bridgeError) {
