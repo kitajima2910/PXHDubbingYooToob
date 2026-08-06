@@ -7,6 +7,7 @@ if (!app) throw new Error("Không tìm thấy vùng giao diện");
 app.innerHTML = `
   <header><img class="brand-mark" src="/PXH.jpg" alt="PXH logo"><div><h1>PXH Dubbing YooToob</h1><p>Realtime Vietnamese AI dubbing</p></div></header>
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
+  <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong>Hoài My</strong></div>
     <div><span>Nguồn</span><strong id="source">—</strong></div>
@@ -18,7 +19,7 @@ app.innerHTML = `
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
     <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
   </section>
-  <footer>Đóng popup và nhấn Play nổi bên trái video.</footer>`;
+  <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
 
@@ -26,12 +27,21 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   return (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
 }
 
+let tab: chrome.tabs.Tab | undefined;
+let currentState: ExtensionState | undefined;
+let toggling = false;
+
 function render(state?: ExtensionState): void {
   const value = state ?? { enabled: false, status: "idle", message: "Mở một video YouTube", processedSegments: 0, source: "—" };
+  currentState = value;
   query("#status").textContent = value.message;
   query("#source").textContent = value.source;
   query("#count").textContent = `${value.processedSegments} đoạn`;
   query("#statusDot").className = `status-dot ${value.status}`;
+  const toggle = query<HTMLButtonElement>("#dubbingToggle");
+  toggle.disabled = toggling || !tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch");
+  toggle.dataset.active = String(value.enabled);
+  toggle.textContent = toggling ? "Đang chuẩn bị…" : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
 }
 
 const keyInput = query<HTMLInputElement>("#groqKey");
@@ -76,16 +86,28 @@ defaultKeyButton.addEventListener("click", () => {
 
 void renderKeyState();
 
-void activeTab().then(async (tab) => {
-  if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
-  let state = await chrome.tabs.sendMessage(tab.id, { action: "status" }).catch(() => undefined) as ExtensionState | undefined;
-  if (!state?.enabled) {
-    const prepared = await chrome.runtime.sendMessage({ action: "capture-prepare", tabId: tab.id }) as { ok?: boolean; message?: string };
-    if (prepared?.ok) {
-      state = await chrome.tabs.sendMessage(tab.id, { action: "capture-ready" }).catch(() => state) as ExtensionState | undefined;
-    } else {
-      state = { enabled: false, status: "error", message: prepared?.message ?? "Không thể cấp quyền thu âm tab", processedSegments: 0, source: "—" };
+query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
+  if (toggling || !tab?.id) return;
+  toggling = true; render(currentState);
+  void (async () => {
+    if (currentState?.enabled) {
+      return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
-  }
-  render(state);
+    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
+    const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 4, sourceVolume: 0.08 }) as ExtensionState;
+    if (result.source === "Groq Whisper" && !capture?.ok) {
+      await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);
+      throw new Error(capture?.message ?? "Không thể cấp quyền thu âm tab");
+    }
+    if (!result.enabled && result.status === "error") void chrome.runtime.sendMessage({ action: "capture-stop" });
+    return result;
+  })().then((state) => render(state), (error: unknown) => render({
+    enabled: false, status: "error", message: error instanceof Error ? error.message : "Không thể điều khiển dubbing", processedSegments: 0, source: "—",
+  })).finally(() => { toggling = false; render(currentState); });
+});
+
+void activeTab().then(async (active) => {
+  tab = active;
+  if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
+  render(await chrome.tabs.sendMessage(tab.id, { action: "status" }).catch(() => undefined) as ExtensionState | undefined);
 });

@@ -17,8 +17,6 @@ let pendingWhisperChunk: WhisperChunk | undefined;
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
-let floatingButton: HTMLButtonElement | undefined;
-let floatingBusy = false;
 const DEFAULT_DELAY_SECONDS = 4;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 
@@ -29,7 +27,7 @@ function takePendingWhisperChunk(): WhisperChunk | undefined {
 }
 
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
-function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; renderFloatingButton(); }
+function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
 
 function speechFingerprint(text: string): string {
   return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi")
@@ -52,59 +50,6 @@ function isDubbingFeedback(text: string): boolean {
   recentDubbingTexts = recentDubbingTexts.filter((item) => item.expiresAt > now);
   return recentDubbingTexts.some((item) => item.text === fingerprint
     || (Math.min(item.text.length, fingerprint.length) >= 14 && (item.text.includes(fingerprint) || fingerprint.includes(item.text))));
-}
-
-const playIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>`;
-const stopIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>`;
-const spinnerIcon = `<span class="spinner" aria-hidden="true"></span>`;
-
-function renderFloatingButton(): void {
-  if (!floatingButton) return;
-  // Spinner chỉ dành cho thao tác khởi động; xử lý chunk/bộ đệm nền vẫn giữ nút Stop ổn định.
-  const loading = floatingBusy;
-  floatingButton.innerHTML = loading ? spinnerIcon : state.enabled ? stopIcon : playIcon;
-  floatingButton.dataset.active = String(state.enabled);
-  floatingButton.dataset.error = String(state.status === "error");
-  floatingButton.setAttribute("aria-label", state.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng");
-  floatingButton.title = state.status === "error" ? state.message : state.enabled ? `Dừng — ${state.message}` : "Bắt đầu lồng tiếng";
-}
-
-function createFloatingControl(): void {
-  if (document.querySelector("#pxh-dubbing-control")) return;
-  const host = document.createElement("div");
-  host.id = "pxh-dubbing-control";
-  const shadow = host.attachShadow({ mode: "closed" });
-  shadow.innerHTML = `<style>
-    :host{all:initial}.wrap{position:fixed;left:12px;top:50%;transform:translateY(-50%);z-index:2147483647;display:flex;align-items:center;gap:8px;font:600 12px system-ui,sans-serif}
-    button{width:44px;height:44px;border:1px solid #ffffff38;border-radius:50%;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#ff3048,#c50021);box-shadow:0 8px 24px #0008,0 0 0 4px #e7193720;cursor:pointer;transition:transform .18s,box-shadow .18s,filter .18s}
-    button:hover{transform:scale(1.07);box-shadow:0 12px 34px #0009,0 0 0 7px #e7193728}button:active{transform:scale(.96)}button[data-active="true"]{background:linear-gradient(145deg,#2a303b,#11141a)}button[data-error="true"]{background:linear-gradient(145deg,#ff6b35,#c92b19)}
-    svg{width:20px;height:20px;fill:currentColor}.spinner{width:17px;height:17px;border:2px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}.hint{padding:7px 10px;border:1px solid #ffffff18;border-radius:8px;color:#fff;background:#11141aeb;box-shadow:0 6px 20px #0006;opacity:0;transform:translateX(-5px);pointer-events:none;transition:.18s;white-space:nowrap}.wrap:hover .hint{opacity:1;transform:none}@keyframes spin{to{transform:rotate(360deg)}}
-  </style><div class="wrap"><button type="button"></button><span class="hint">PXH Dubbing</span></div>`;
-  floatingButton = shadow.querySelector<HTMLButtonElement>("button")!;
-  floatingButton.addEventListener("click", () => { void toggleFromFloatingButton(); });
-  document.documentElement.append(host);
-  renderFloatingButton();
-}
-
-async function toggleFromFloatingButton(): Promise<void> {
-  if (floatingBusy) return;
-  floatingBusy = true; renderFloatingButton();
-  try {
-    if (state.enabled) { await stop(); return; }
-    const delaySeconds = DEFAULT_DELAY_SECONDS;
-    const sourceVolume = DEFAULT_SOURCE_VOLUME;
-    const capture = await chrome.runtime.sendMessage({ action: "capture-start", sourceVolume }) as { ok?: boolean; message?: string };
-    const captureReady = capture?.ok === true;
-    const result = await start(delaySeconds, sourceVolume);
-    if (result.source === "Groq Whisper" && !captureReady) {
-      await stop();
-      throw new Error(capture?.message ?? "Whisper cần bạn mở icon extension một lần để cấp quyền thu âm tab");
-    }
-    if (!result.enabled && result.status === "error") void chrome.runtime.sendMessage({ action: "capture-stop" });
-  } catch (error) {
-    void chrome.runtime.sendMessage({ action: "capture-stop" });
-    fail(error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng");
-  } finally { floatingBusy = false; renderFloatingButton(); }
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -316,13 +261,6 @@ function fail(message: string): ExtensionState { update({ enabled: false, status
 
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
-  if (request.action === "capture-ready") {
-    if (!state.enabled && state.status === "error" && /invoked|current page|tab.?capture/i.test(state.message)) {
-      update({ status: "idle", message: "Đã cấp quyền — nhấn Play bên trái video" });
-    }
-    respond(state);
-    return;
-  }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
     const video = document.querySelector<HTMLVideoElement>("video");
@@ -351,5 +289,3 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
 });
 
 setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
-
-createFloatingControl();

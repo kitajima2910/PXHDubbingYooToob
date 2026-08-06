@@ -180,10 +180,10 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number } | null;
-  if (request?.action === "capture-start" || request?.action === "capture-prepare") {
+  if (request?.action === "capture-start") {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
-    const sourceVolume = request.action === "capture-prepare" ? 1 : request.sourceVolume ?? 0.08;
+    const sourceVolume = request.sourceVolume ?? 0.08;
     void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
