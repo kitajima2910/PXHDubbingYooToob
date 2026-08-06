@@ -1,6 +1,11 @@
 # Trạng thái PXHDubbingYooToob
 
 > Cập nhật 2026-08-06: Bổ sung fallback lấy transcript trong MAIN world qua YouTube `youtubei/v1/get_transcript`; nếu trang chưa có `params`, lấy qua `youtubei/v1/next`. Extension parse trực tiếp các `transcriptSegmentRenderer`, tránh trường hợp timedtext và fallback service worker trả mảng rỗng. Đã chạy `npm run check`, 8/8 test và production build thành công.
+> Bổ sung parser cho cả định dạng `transcriptCueRenderer` của endpoint transcript, tăng timeout bridge lên 20 giây và giữ lại đồng thời lỗi bridge/backend để popup không còn che nguyên nhân thật. Verify lại check, 8/8 test và build thành công.
+> Giữ riêng lỗi MAIN-world transcript và isolated-world timedtext để chẩn đoán chính xác; xác nhận lỗi lấy phụ đề này không phụ thuộc việc redeploy Vercel.
+> Sửa HTTP 400 của `get_transcript`: luôn lấy transcript params mới từ `youtubei/v1/next` theo video ID hiện tại (tránh dữ liệu SPA cũ), gửi client/version/visitor headers của phiên YouTube và hiển thị response lỗi rút gọn nếu endpoint vẫn từ chối.
+> Sửa `FAILED_PRECONDITION`: giữ `clickTrackingParams` đi cùng `getTranscriptEndpoint`, đưa vào `context.clickTracking` và thêm `x-goog-api-format-version: 2` giống request InnerTube của YouTube.
+> Thay params phụ thuộc UI bằng protobuf transcript tự tạo từ video ID, language code và loại ASR của caption track; bỏ request `next` khỏi đường chính để giảm thời gian đứng ở “Đang tải phụ đề”.
 
 Cập nhật: 2026-08-06
 

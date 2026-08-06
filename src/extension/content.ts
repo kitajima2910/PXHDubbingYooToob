@@ -89,9 +89,15 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     let captions: { segments: SubtitleSegment[]; source: string };
     let useBackend = false;
     try { captions = await loadYouTubeCaptions(); }
-    catch {
+    catch (bridgeError) {
       useBackend = true;
-      captions = await loadBackendCaptions(currentVideoId, Math.round(video.currentTime * 1000), Math.round(video.currentTime * 1000) + 60_000, sessionController.signal);
+      try {
+        captions = await loadBackendCaptions(currentVideoId, Math.round(video.currentTime * 1000), Math.round(video.currentTime * 1000) + 60_000, sessionController.signal);
+      } catch (backendError) {
+        const pageMessage = bridgeError instanceof Error ? bridgeError.message : "không rõ lỗi";
+        const backendMessage = backendError instanceof Error ? backendError.message : "không rõ lỗi";
+        throw new Error(`YouTube: ${pageMessage}. Fallback: ${backendMessage}`);
+      }
     }
     update({ source: captions.source });
     scheduler.start();

@@ -7,7 +7,7 @@ interface BridgePayload { text: string; format: "json3" | "xml" | "segments"; so
 function loadFromPageWorld(): Promise<BridgePayload> {
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, 10_000);
+    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, 20_000);
     const onMessage = (event: MessageEvent<unknown>): void => {
       if (event.source !== window) return;
       const message = event.data as { type?: string; requestId?: string; payload?: BridgePayload; error?: string } | null;
@@ -119,8 +119,14 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
     const tracks = tracksFrom(findPlayerResponse());
     const track = tracks.find((item) => item.languageCode === "vi") ?? tracks.find((item) => item.kind !== "asr") ?? tracks[0];
     if (!track) throw bridgeError;
-    data = await fetchCaptionData(track.baseUrl);
-    source = track.kind === "asr" ? "YouTube (tự động)" : "YouTube";
+    try {
+      data = await fetchCaptionData(track.baseUrl);
+      source = track.kind === "asr" ? "YouTube (tự động)" : "YouTube";
+    } catch (isolatedError) {
+      const bridgeMessage = bridgeError instanceof Error ? bridgeError.message : "không rõ lỗi";
+      const isolatedMessage = isolatedError instanceof Error ? isolatedError.message : "không rõ lỗi";
+      throw new Error(`Bridge transcript: ${bridgeMessage}; timedtext: ${isolatedMessage}`);
+    }
   }
   const segments = (data.events ?? []).flatMap((event, index) => {
     const sourceText = decodeEntities((event.segs ?? []).map((part) => part.utf8 ?? "").join(""));
