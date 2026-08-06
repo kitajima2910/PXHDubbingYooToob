@@ -8,6 +8,8 @@ export function prepare(req: VercelRequest, res: VercelResponse, maxBytes = 64_0
   if (allowedOrigin && origin && origin !== allowedOrigin) { jsonError(res, 403, "ORIGIN_DENIED", "Nguồn yêu cầu không được phép"); return false; }
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin ?? "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Vary", "Origin");
   if (req.method === "OPTIONS") { res.status(204).end(); return false; }
   if (req.method !== "POST") { jsonError(res, 405, "METHOD_NOT_ALLOWED", "Phương thức không được hỗ trợ"); return false; }
   const length = Number(req.headers["content-length"] ?? 0);

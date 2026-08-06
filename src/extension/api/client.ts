@@ -1,20 +1,17 @@
 import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+interface ApiResponse<T> { ok: boolean; status: number; data?: T; audioBase64?: string; mimeType?: string; message?: string }
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    ...(signal ? { signal } : {}),
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: "Dịch vụ không phản hồi" } })) as { error?: { message?: string } };
-    throw new Error(error.error?.message ?? "Dịch vụ không phản hồi");
-  }
-  return response.json() as Promise<T>;
+  const requestId = crypto.randomUUID();
+  const onAbort = (): void => { void chrome.runtime.sendMessage({ action: "api-cancel", requestId }); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "api-request", requestId, path, body, responseType: "json" }) as ApiResponse<T>;
+    if (!response.ok || response.data === undefined) throw new Error(response.message ?? "Dịch vụ không phản hồi");
+    return response.data;
+  } finally { signal?.removeEventListener("abort", onAbort); }
 }
 
 export async function translateSegments(segments: SubtitleSegment[], signal?: AbortSignal): Promise<SubtitleSegment[]> {
@@ -25,13 +22,19 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
 }
 
 export async function createSpeech(text: string, rate: number, signal?: AbortSignal): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}/api/tts`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, voice: "vi-VN-HoaiMyNeural", rate }),
-    ...(signal ? { signal } : {}),
-  });
-  if (!response.ok) throw new Error("Không thể tạo giọng nói");
-  return response.blob();
+  const requestId = crypto.randomUUID();
+  const onAbort = (): void => { void chrome.runtime.sendMessage({ action: "api-cancel", requestId }); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: "api-request", requestId, path: "/api/tts", responseType: "audio",
+      body: { text, voice: "vi-VN-HoaiMyNeural", rate },
+    }) as ApiResponse<never>;
+    if (!response.ok || !response.audioBase64) throw new Error(response.message ?? "Không thể tạo giọng nói");
+    const binary = atob(response.audioBase64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new Blob([bytes], { type: response.mimeType ?? "audio/mpeg" });
+  } finally { signal?.removeEventListener("abort", onAbort); }
 }
 
 export async function loadBackendCaptions(videoId: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<{ segments: SubtitleSegment[]; source: string }> {
