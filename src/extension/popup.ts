@@ -9,11 +9,11 @@ app.innerHTML = `
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
-    <div><span>Giọng đọc</span><strong>Hoài My</strong></div>
+    <div><span>Giọng đọc</span><strong>Chrome / Hoài My</strong></div>
     <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Đồng bộ</span><strong>Transcript hoặc Whisper 5 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → AssemblyAI → Whisper</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>

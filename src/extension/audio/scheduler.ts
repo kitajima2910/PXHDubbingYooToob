@@ -1,6 +1,6 @@
 import type { SubtitleSegment } from "../../shared/types";
 
-interface ScheduledAudio { segment: SubtitleSegment; url: string }
+interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
 const MAX_START_LATENESS_MS = 12_000;
 const MIN_SMOOTH_RATE = 0.95;
 const MAX_SMOOTH_RATE = 1.25;
@@ -16,7 +16,7 @@ export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs:
 
 export class AudioScheduler {
   private readonly items = new Map<string, ScheduledAudio>();
-  private active: { id: string; audio: HTMLAudioElement } | undefined;
+  private active: { id: string; audio?: HTMLAudioElement; chromeTts?: boolean } | undefined;
   private readonly played = new Set<string>();
   private frame = 0;
   private originalVolume: number;
@@ -35,8 +35,14 @@ export class AudioScheduler {
   }
   add(segment: SubtitleSegment, blob: Blob): void {
     const previous = this.items.get(segment.id);
-    if (previous) URL.revokeObjectURL(previous.url);
+    if (previous?.url) URL.revokeObjectURL(previous.url);
     this.items.set(segment.id, { segment, url: URL.createObjectURL(blob) });
+  }
+
+  addSpeech(segment: SubtitleSegment, text: string): void {
+    const previous = this.items.get(segment.id);
+    if (previous?.url) URL.revokeObjectURL(previous.url);
+    this.items.set(segment.id, { segment, text });
   }
 
   start(): void {
@@ -59,8 +65,20 @@ export class AudioScheduler {
     this.stopActive();
     // At-most-once trong một timeline: nếu play/resume lỗi, tick sau không được phát lại từ đầu.
     this.played.add(item.segment.id);
-    const audio = new Audio(item.url);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
+    if (item.text !== undefined) {
+      const estimatedDuration = Math.max(0.8, item.text.length / 14);
+      const rate = speechPlaybackRate(estimatedDuration, slotDuration, this.video.playbackRate);
+      this.active = { id: item.segment.id, chromeTts: true };
+      void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(() => {
+        if (this.active?.id === item.segment.id) this.finishActive();
+      }, () => {
+        if (this.active?.id === item.segment.id) this.stopActive();
+      });
+      return;
+    }
+    if (!item.url) return;
+    const audio = new Audio(item.url);
     const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
     const catchupRate = 1 + Math.min(0.1, latenessMs / 40_000);
     audio.preload = "auto";
@@ -80,16 +98,23 @@ export class AudioScheduler {
 
   private stopActive(): void {
     if (!this.active) return;
-    this.active.audio.pause();
+    this.active.audio?.pause();
+    if (this.active.chromeTts) void chrome.runtime.sendMessage({ action: "tts-stop" });
     this.active = undefined;
   }
 
   private finishActive(): void { if (this.active) this.played.add(this.active.id); this.stopActive(); }
-  private readonly onPause = (): void => { this.active?.audio.pause(); };
-  private readonly onResume = (): void => { if (this.active) void this.active.audio.play().catch(() => this.stopActive()); };
+  private readonly onPause = (): void => {
+    this.active?.audio?.pause();
+    if (this.active?.chromeTts) void chrome.runtime.sendMessage({ action: "tts-pause" });
+  };
+  private readonly onResume = (): void => {
+    if (this.active?.audio) void this.active.audio.play().catch(() => this.stopActive());
+    else if (this.active?.chromeTts) void chrome.runtime.sendMessage({ action: "tts-resume" });
+  };
   private readonly onSeek = (): void => { this.stopActive(); this.played.clear(); };
   private readonly onRateChange = (): void => {
-    if (this.active) {
+    if (this.active?.audio) {
       const baseRate = Number(this.active.audio.dataset.baseRate ?? 1);
       const catchupRate = Number(this.active.audio.dataset.catchupRate ?? 1);
       this.active.audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, Math.max(0.85, baseRate * this.video.playbackRate * catchupRate));
@@ -102,7 +127,7 @@ export class AudioScheduler {
     this.video.volume = this.originalVolume;
     this.video.removeEventListener("pause", this.onPause); this.video.removeEventListener("play", this.onResume);
     this.video.removeEventListener("seeking", this.onSeek); this.video.removeEventListener("ratechange", this.onRateChange);
-    for (const item of this.items.values()) URL.revokeObjectURL(item.url);
+    for (const item of this.items.values()) if (item.url) URL.revokeObjectURL(item.url);
     this.items.clear(); this.played.clear();
   }
 }

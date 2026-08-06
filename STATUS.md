@@ -1,5 +1,8 @@
 # Trạng thái PXHDubbingYooToob
 
+> AssemblyAI/Chrome TTS 2026-08-07: thêm `/api/assemblyai/token` để Vercel cấp token streaming 60 giây mà không lộ master key; offscreen gửi PCM16 trực tiếp tới `whisper-rt`, chỉ xử lý Turn finalized và ánh xạ timestamp về `video.currentTime`. Video không transcript ưu tiên `AssemblyAI — realtime`, tự fallback Groq Whisper 5 giây nếu token/WebSocket lỗi. Scheduler ưu tiên giọng Việt miễn phí qua `chrome.tts`, máy không có voice `vi` vẫn dùng Edge TTS Hoài My. Manifest thêm quyền `tts` và host AssemblyAI.
+> Verify AssemblyAI/Chrome TTS: endpoint local đã cấp token thật thành công; `npm run check`, 9/9 test và production build đều đạt. Chưa kiểm thử phát âm thanh tương tác trong Chrome; cần deploy endpoint mới lên Vercel rồi reload extension để kiểm thử end-to-end.
+
 > Đồng bộ 2026-08-07: ưu tiên transcript DOM trước timedtext/backend, giữ nguyên từng cue và timestamp YouTube; popup hiển thị `Transcript — đồng bộ`. Video không có transcript dùng chunk Whisper 5 giây; hàng đợi đổi từ latest-wins sang FIFO để không ghi đè/bỏ mất lời khi xử lý chậm, popup hiển thị `Whisper — trễ khoảng 5–8 giây`. Đã chạy typecheck, 8/8 test và production build thành công.
 
 > UI 2026-08-06: gỡ hoàn toàn nút nổi khỏi trang YouTube để không che video; Start/Stop chuyển lại thành nút toàn chiều rộng trong popup `PXH Dubbing YooToob`, cùng trạng thái và BYOK. Popup tự xin tabCapture ngay khi người dùng nhấn Start, dùng độ trễ Whisper 4 giây và âm gốc 8%.

@@ -1,6 +1,6 @@
 import type { ExtensionState, SubtitleSegment } from "../shared/types";
 import { batchSegments, selectUpcomingSegments } from "../shared/segments";
-import { createSpeech, loadBackendCaptions, transcribeAudio, translateSegments } from "./api/client";
+import { createAssemblyToken, createSpeech, loadBackendCaptions, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
 
@@ -16,9 +16,22 @@ let whisperProcessing = false;
 let whisperQueue: WhisperChunk[] = [];
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
+let assemblyMode = false;
+let assemblySessionStartMs = 0;
+let assemblyProcessing = false;
+let assemblyQueue: AssemblyTurn[] = [];
+let assemblyTurns = new Set<number>();
+let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
+
+interface AssemblyTurn {
+  turnOrder: number;
+  text: string;
+  language: string;
+  words: Array<{ start?: number; end?: number; text?: string }>;
+}
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
@@ -57,6 +70,15 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal): Promise<void> {
+  const text = segment.translatedText ?? segment.sourceText;
+  if (chromeTtsAvailable) {
+    scheduler?.addSpeech(segment, text);
+    return;
+  }
+  scheduler?.add(segment, await createSpeech(text, 1, signal));
+}
+
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>, onFirstAudio: () => void): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
   const candidates = selectUpcomingSegments(segments, fromMs, 45_000, queued);
@@ -74,8 +96,7 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
         const segment = translated[nextIndex++];
         if (!segment) return;
         try {
-          const audio = await createSpeech(segment.translatedText ?? segment.sourceText, 1, signal);
-          scheduler?.add(segment, audio);
+          await addPreparedSpeech(segment, signal);
           update({ processedSegments: state.processedSegments + 1 });
           if (state.processedSegments === 1) onFirstAudio();
         } catch (error) { queued.delete(segment.id); if (!signal.aborted) console.warn("PXHDubbingYooToob: bỏ qua một câu TTS lỗi", error); }
@@ -118,8 +139,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   await Promise.all(translated.map(async (segment) => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
-    const audio = await createSpeech(dubbingText, 1, signal);
-    scheduler?.add(segment, audio);
+    await addPreparedSpeech(segment, signal);
     rememberDubbingText(dubbingText);
     update({ processedSegments: state.processedSegments + 1 });
     if (resumeAfterWhisperWarmup) {
@@ -128,6 +148,75 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     }
   }));
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
+}
+
+async function processAssemblyTurn(turn: AssemblyTurn, signal: AbortSignal): Promise<void> {
+  const video = document.querySelector<HTMLVideoElement>("video");
+  if (!video || signal.aborted || !assemblyMode) return;
+  const text = turn.text.replace(/\s+/g, " ").trim();
+  if (!text || /^(?:\s*\[[^\]]+\]\s*)+$/.test(text) || isDubbingFeedback(text)) return;
+  if (/^(?:vi|vie|vietnamese)$/i.test(turn.language) && recentDubbingTexts.length) return;
+  const firstWord = turn.words.find((word) => Number.isFinite(word.start));
+  const lastWord = [...turn.words].reverse().find((word) => Number.isFinite(word.end));
+  const relativeStartMs = Math.max(0, Math.round(firstWord?.start ?? 0));
+  const relativeEndMs = Math.max(relativeStartMs + 500, Math.round(lastWord?.end ?? relativeStartMs + 2_000));
+  const videoNowMs = video.currentTime * 1000;
+  const mappedStartMs = assemblySessionStartMs + relativeStartMs;
+  // Rebase after seek or a long pause: Assembly's session clock keeps moving
+  // while video.currentTime may jump or stand still.
+  if (mappedStartMs > videoNowMs + 1_000 || videoNowMs - mappedStartMs > 15_000) {
+    assemblySessionStartMs = Math.round(videoNowMs - relativeStartMs);
+  }
+  const desiredStartMs = assemblySessionStartMs + relativeStartMs + 1_500;
+  const startMs = Math.round(Math.max(desiredStartMs, videoNowMs + 250));
+  const segment: SubtitleSegment = {
+    id: `assembly-${turn.turnOrder}`,
+    startMs,
+    endMs: startMs + Math.max(500, relativeEndMs - relativeStartMs),
+    sourceText: text,
+  };
+  update({ status: "translating", message: "Đang dịch AssemblyAI" });
+  const [translated] = await translateSegments([segment], signal);
+  if (!translated || signal.aborted) return;
+  update({ status: "speaking", message: "Đang chuẩn bị giọng nói" });
+  await addPreparedSpeech(translated, signal);
+  const dubbingText = translated.translatedText ?? translated.sourceText;
+  rememberDubbingText(dubbingText);
+  update({ processedSegments: state.processedSegments + 1, status: "ready", message: "Đang lồng tiếng realtime" });
+}
+
+function drainAssemblyQueue(signal: AbortSignal): void {
+  if (assemblyProcessing) return;
+  assemblyProcessing = true;
+  void (async () => {
+    while (!signal.aborted && assemblyMode) {
+      const turn = assemblyQueue.shift();
+      if (!turn) break;
+      await processAssemblyTurn(turn, signal);
+    }
+  })().catch((error: unknown) => {
+    if (!signal.aborted) switchAssemblyToWhisper(error instanceof Error ? error.message : "AssemblyAI không thể xử lý audio");
+  }).finally(() => {
+    assemblyProcessing = false;
+    if (assemblyQueue.length && !signal.aborted && assemblyMode) drainAssemblyQueue(signal);
+  });
+}
+
+function queueAssemblyTurn(turn: AssemblyTurn, signal: AbortSignal): void {
+  if (assemblyTurns.has(turn.turnOrder)) return;
+  assemblyTurns.add(turn.turnOrder);
+  assemblyQueue.push(turn);
+  drainAssemblyQueue(signal);
+}
+
+function switchAssemblyToWhisper(reason: string): void {
+  if (!assemblyMode || !controller) return;
+  console.warn("PXHDubbingYooToob: AssemblyAI fallback sang Whisper", reason);
+  assemblyMode = false;
+  assemblyQueue = [];
+  whisperMode = true;
+  update({ status: "ready", message: "AssemblyAI gián đoạn, đang dùng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
+  void chrome.runtime.sendMessage({ action: "capture-reset" });
 }
 
 function drainWhisperQueue(signal: AbortSignal): void {
@@ -199,9 +288,12 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
   whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  assemblyMode = false; assemblySessionStartMs = 0; assemblyProcessing = false; assemblyQueue = []; assemblyTurns = new Set<number>();
   recentDubbingTexts = [];
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
+  const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
+  chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
   try {
     let captions: { segments: SubtitleSegment[]; source: string };
@@ -212,13 +304,22 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
       try {
         captions = await loadBackendCaptions(currentVideoId, Math.round(video.currentTime * 1000), Math.round(video.currentTime * 1000) + 60_000, sessionController.signal);
       } catch (backendError) {
-        console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError);
-        whisperMode = true;
         // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
         await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
-        update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
         scheduler.start();
-        await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+        try {
+          const token = await createAssemblyToken(sessionController.signal);
+          const assembly = await chrome.runtime.sendMessage({ action: "assembly-start", token: token.token }) as { ok?: boolean; message?: string };
+          if (!assembly?.ok) throw new Error(assembly?.message ?? "Không thể bắt đầu AssemblyAI");
+          assemblyMode = true;
+          assemblySessionStartMs = Math.round(video.currentTime * 1000);
+          update({ enabled: true, status: "ready", message: "Đang nghe video realtime", source: "AssemblyAI — realtime" });
+        } catch (assemblyError) {
+          console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError, assemblyError);
+          whisperMode = true;
+          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
+          await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+        }
         if (resumeWhenReady) void video.play().catch(() => undefined);
         return state;
       }
@@ -251,6 +352,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
+  assemblyMode = false; assemblyProcessing = false; assemblyQueue = []; assemblyTurns.clear();
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
@@ -261,8 +363,21 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; turnOrder?: number; text?: string; language?: string; words?: Array<{ start?: number; end?: number; text?: string }>; message?: string }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
+  if (request.action === "assembly-turn") {
+    if (controller && assemblyMode && Number.isInteger(request.turnOrder) && request.text) {
+      queueAssemblyTurn({
+        turnOrder: request.turnOrder!, text: request.text,
+        language: request.language ?? "", words: request.words ?? [],
+      }, controller.signal);
+    }
+    respond({ ok: true }); return;
+  }
+  if (request.action === "assembly-stream-error") {
+    switchAssemblyToWhisper(request.message ?? "Mất kết nối AssemblyAI");
+    respond({ ok: true }); return;
+  }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
     const video = document.querySelector<HTMLVideoElement>("video");
