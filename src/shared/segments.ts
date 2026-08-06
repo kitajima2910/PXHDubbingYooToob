@@ -5,9 +5,10 @@ export function stripTranscriptTimestamps(text: string, knownTimestamp = ""): st
   const known = knownTimestamp.replace(/\s+/g, " ").trim();
   if (known) {
     const escaped = known.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    cleaned = cleaned.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "g"), "$1");
+    cleaned = cleaned.replace(new RegExp(escaped, "g"), " ");
   }
   return cleaned
+    .replace(/^\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=\p{L})/u, "")
     .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();

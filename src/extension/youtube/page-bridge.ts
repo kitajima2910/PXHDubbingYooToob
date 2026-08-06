@@ -113,9 +113,10 @@ function stripTranscriptTimestamps(text: string, knownTimestamp = ""): string {
   const known = knownTimestamp.replace(/\s+/g, " ").trim();
   if (known) {
     const escaped = known.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    cleaned = cleaned.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "g"), "$1");
+    cleaned = cleaned.replace(new RegExp(escaped, "g"), " ");
   }
   return cleaned
+    .replace(/^\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=\p{L})/u, "")
     .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
@@ -161,12 +162,14 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
     const attributedStrings = [...row.querySelectorAll<HTMLElement>(".yt-core-attributed-string")]
       .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
     const rawText = (row.textContent ?? "").replace(/\s+/g, " ").trim();
-    const timeText = row.querySelector(".segment-timestamp, [class*='timestamp']")?.textContent
+    const timeText = row.querySelector(".segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp, [class*='timestamp'], [class*='Timestamp']")?.textContent
       ?? attributedStrings.find((text) => /^\d{1,2}(?:[:.：]\d{2}){1,2}$/.test(text))
       ?? rawText.match(/^\d{1,2}(?:[:.：]\d{2}){1,2}/)?.[0]
       ?? "";
     const clone = row.cloneNode(true) as Element;
-    clone.querySelectorAll(".segment-timestamp, [class*='timestamp'], [class*='time-button']").forEach((element) => element.remove());
+    clone.querySelectorAll(
+      ".segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp, .ytwTranscriptSegmentViewModelTimestampActive, [class*='timestamp'], [class*='Timestamp'], [class*='time-button'], [aria-hidden='true'][class*='Timestamp']",
+    ).forEach((element) => element.remove());
     if (timeText) {
       const normalizedTime = timeText.replace(/\s+/g, " ").trim();
       [...clone.querySelectorAll("button, .yt-core-attributed-string, span")]
