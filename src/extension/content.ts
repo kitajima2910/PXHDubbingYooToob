@@ -19,7 +19,7 @@ let whisperInitialPauseDone = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
-const DEFAULT_DELAY_SECONDS = 6;
+const DEFAULT_DELAY_SECONDS = 4;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
@@ -331,7 +331,7 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
       const whisperChunk: WhisperChunk = {
         audioBase64: chunk.audioBase64,
         mimeType: chunk.mimeType,
-        durationMs: Math.max(500, request.durationMs ?? 5_000),
+        durationMs: Math.max(500, request.durationMs ?? 4_000),
         capturedEndMs: Math.round(video.currentTime * 1000),
       };
       if (whisperMode) {

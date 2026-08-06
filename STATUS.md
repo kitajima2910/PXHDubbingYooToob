@@ -1,6 +1,6 @@
 # Trạng thái PXHDubbingYooToob
 
-> UI 2026-08-06: chuyển Start/Stop sang nút Play nổi 44 px ở giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup `PXH Dubbing YooToob` chỉ hiển thị trạng thái/thông tin, không còn nút hay settings. Dùng cấu hình cố định độ trễ Whisper 6 giây và âm gốc 8%. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
+> UI 2026-08-06: chuyển Start/Stop sang nút Play nổi 44 px ở giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup `PXH Dubbing YooToob` hiển thị trạng thái và BYOK. Dùng cấu hình cố định độ trễ Whisper 4 giây và âm gốc 8%. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
 > BYOK Groq: popup cho nhập/lưu/xóa API key riêng trong `chrome.storage.local` (password field, không hiển thị lại). Service worker ưu tiên key riêng và gọi thẳng `api.groq.com` cho translate/Whisper; key không qua content script hay Vercel. Khi không có key riêng, giữ nguyên backend/key mặc định. Manifest chỉ bổ sung host permission chính thức của Groq.
 > Verify BYOK: `npm run check`, 8/8 test và production build đạt; bundle popup/background mới đã sinh thành công. Key riêng chỉ được đọc trong popup/service worker, không được gửi sang content script hoặc ghi log.
 > Auto failover Groq: nếu key riêng trả 429 hoặc lỗi quota/rate-limit, service worker retry ngay request hiện tại qua backend/key mặc định. `Retry-After` được lưu trong `chrome.storage.session` (mặc định 5 phút, giới hạn 30 giây–24 giờ) để các request sau tạm bỏ qua key riêng; lưu key mới sẽ xóa cooldown. Popup hiển thị key đang cooldown.
@@ -14,6 +14,7 @@
 > Scheduler chuyển sang at-most-once: đánh dấu segment đã phát ngay khi bắt đầu tạo `Audio`, nên lỗi play/resume không khiến animation tick chọn lại đoạn đó từ đầu; thao tác seek vẫn xóa dấu để đồng bộ lại timeline.
 > Scheduler chống mất câu: bỏ cắt cưỡng bức audio ở `endMs + 3s`, luôn để TTS kết thúc tự nhiên; các blob TTS tạo song song được chọn lại theo `segment.startMs` thay vì thứ tự hoàn thành request; cửa sổ bắt kịp tăng 5 → 12 giây và cho phép phát câu vừa quá `endMs` thay vì bỏ thẳng.
 > Verify scheduler chống mất câu: `npm run check`, 8/8 test và production build đạt.
+> Đồng bộ hình/tiếng: Whisper chunk và delay giảm 5/6 giây xuống 4/4 giây. TTS dài được phép tăng tự nhiên tối đa 1.25x; câu bắt đầu muộn có catch-up thích ứng tối đa +10%, tổng playback cap 1.35x để giảm tích lũy trễ mà không bỏ từ.
 > Giảm cold-start Whisper: giữ chunk audio 5 giây gần nhất trong lúc dò caption và xử lý ngay khi fallback được xác nhận, thay vì bỏ chunk đầu rồi chờ thêm 5 giây.
 > Dùng `public/PXH.jpg` làm logo popup và icon extension/action; asset được Vite sao chép nguyên vẹn vào production build.
 > Chrome không render ổn định JPEG trong Manifest icon; xuất từ `PXH.jpg` thành PNG chuẩn 16/32/48/128 px trong `public/icons` và chuyển `icons/default_icon` sang bộ PNG.

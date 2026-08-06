@@ -42,7 +42,7 @@ function recordChunk(): void {
     })).finally(() => { if (stream?.active) recordChunk(); });
   }, { once: true });
   current.start();
-  timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 5_000);
+  timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 4_000);
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {

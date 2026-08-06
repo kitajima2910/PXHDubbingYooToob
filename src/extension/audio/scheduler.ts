@@ -3,7 +3,8 @@ import type { SubtitleSegment } from "../../shared/types";
 interface ScheduledAudio { segment: SubtitleSegment; url: string }
 const MAX_START_LATENESS_MS = 12_000;
 const MIN_SMOOTH_RATE = 0.95;
-const MAX_SMOOTH_RATE = 1.15;
+const MAX_SMOOTH_RATE = 1.25;
+const MAX_PLAYBACK_RATE = 1.35;
 
 export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs: number, videoRate: number): number {
   const naturalRate = !Number.isFinite(audioDurationSeconds) || audioDurationSeconds <= 0
@@ -60,14 +61,17 @@ export class AudioScheduler {
     this.played.add(item.segment.id);
     const audio = new Audio(item.url);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
+    const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
+    const catchupRate = 1 + Math.min(0.1, latenessMs / 40_000);
     audio.preload = "auto";
     audio.volume = 1;
     audio.dataset.baseRate = "1";
-    audio.playbackRate = speechPlaybackRate(0, slotDuration, this.video.playbackRate);
+    audio.dataset.catchupRate = String(catchupRate);
+    audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(0, slotDuration, this.video.playbackRate) * catchupRate);
     audio.addEventListener("loadedmetadata", () => {
       const baseRate = speechPlaybackRate(audio.duration, slotDuration, 1);
       audio.dataset.baseRate = String(baseRate);
-      audio.playbackRate = Math.min(1.3, Math.max(0.85, baseRate * this.video.playbackRate));
+      audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, Math.max(0.85, baseRate * this.video.playbackRate * catchupRate));
     }, { once: true });
     audio.addEventListener("ended", () => this.finishActive(), { once: true });
     void audio.play().catch(() => this.stopActive());
@@ -87,7 +91,8 @@ export class AudioScheduler {
   private readonly onRateChange = (): void => {
     if (this.active) {
       const baseRate = Number(this.active.audio.dataset.baseRate ?? 1);
-      this.active.audio.playbackRate = Math.min(1.3, Math.max(0.85, baseRate * this.video.playbackRate));
+      const catchupRate = Number(this.active.audio.dataset.catchupRate ?? 1);
+      this.active.audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, Math.max(0.85, baseRate * this.video.playbackRate * catchupRate));
     }
   };
 

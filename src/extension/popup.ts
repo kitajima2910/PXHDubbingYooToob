@@ -12,7 +12,7 @@ app.innerHTML = `
     <div><span>Nguồn</span><strong id="source">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Độ trễ tự động</span><strong>6 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Độ trễ tự động</span><strong>4 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
