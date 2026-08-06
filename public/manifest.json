@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "116",
   "name": "PXHDubbingYooToob",
   "version": "0.1.0",
   "description": "Lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabCapture", "offscreen"],
   "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://pxh-dubbing-yoo-toob.vercel.app/*"],
   "action": { "default_popup": "popup.html", "default_title": "PXHDubbingYooToob" },
   "background": { "service_worker": "background.js", "type": "module" },

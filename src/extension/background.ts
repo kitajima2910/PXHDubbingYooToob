@@ -8,8 +8,25 @@ async function pauseYouTubeTabs(): Promise<void> {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts"]);
+const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe"]);
 const requests = new Map<string, AbortController>();
+
+async function ensureOffscreenDocument(): Promise<void> {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] });
+  if (contexts.length) return;
+  await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: [chrome.offscreen.Reason.USER_MEDIA], justification: "Thu âm tab YouTube để nhận dạng lời nói khi video không có phụ đề" });
+}
+
+async function startTabCapture(tabId: number, sourceVolume: number): Promise<void> {
+  await ensureOffscreenDocument();
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  const response = await chrome.runtime.sendMessage({ action: "capture-offscreen-start", streamId, tabId, sourceVolume }) as { ok?: boolean; message?: string };
+  if (!response?.ok) throw new Error(response?.message ?? "Không thể bắt đầu thu âm tab");
+}
+
+async function stopTabCapture(): Promise<void> {
+  await chrome.runtime.sendMessage({ action: "capture-offscreen-stop" }).catch(() => undefined);
+}
 
 function requestKey(sender: chrome.runtime.MessageSender, requestId: string): string {
   return `${sender.tab?.id ?? "extension"}:${requestId}`;
@@ -88,7 +105,16 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio" } | null;
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number } | null;
+  if (request?.action === "capture-start" && request.tabId !== undefined) {
+    void startTabCapture(request.tabId, request.sourceVolume ?? 0.25).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
+    return true;
+  }
+  if (request?.action === "capture-stop") { void stopTabCapture().then(() => respond({ ok: true })); return true; }
+  if (request?.action === "capture-chunk" && request.tabId !== undefined && request.audioBase64 && request.mimeType && request.durationMs) {
+    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-chunk", audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
   if (request?.action === "api-cancel" && request.requestId) {
     requests.get(requestKey(sender, request.requestId))?.abort();
     respond({ ok: true });

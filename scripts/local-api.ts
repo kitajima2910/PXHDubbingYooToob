@@ -5,6 +5,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import translate from "../src/api/translate.js";
 import tts from "../src/api/tts.js";
 import youtubeSubtitles from "../src/api/subtitles/youtube.js";
+import transcribe from "../src/api/transcribe.js";
 
 function loadLocalEnvironment(): void {
   try {
@@ -21,7 +22,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const value = Buffer.from(chunk);
     size += value.length;
-    if (size > 128_000) throw new Error("PAYLOAD_TOO_LARGE");
+    if (size > 2_100_000) throw new Error("PAYLOAD_TOO_LARGE");
     chunks.push(value);
   }
   if (!chunks.length) return undefined;
@@ -38,7 +39,7 @@ function adaptResponse(response: ServerResponse): VercelResponse {
 
 loadLocalEnvironment();
 const port = Number(process.env.PORT ?? 3000);
-const handlers = new Map([["/api/translate", translate], ["/api/tts", tts], ["/api/subtitles/youtube", youtubeSubtitles]]);
+const handlers = new Map([["/api/translate", translate], ["/api/tts", tts], ["/api/subtitles/youtube", youtubeSubtitles], ["/api/transcribe", transcribe]]);
 
 createServer(async (request, response) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;

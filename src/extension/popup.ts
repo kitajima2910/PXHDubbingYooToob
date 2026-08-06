@@ -47,8 +47,18 @@ async function send(action: "start" | "stop"): Promise<void> {
   }
   const delaySeconds = Number(query<HTMLInputElement>("#delay").value);
   const sourceVolume = Number(query<HTMLInputElement>("#volume").value) / 100;
-  try { if (version === interactionVersion) render(await chrome.tabs.sendMessage(tabId, { action, delaySeconds, sourceVolume }) as ExtensionState); }
-  catch { if (version === interactionVersion) render({ enabled: false, status: "error", message: "Không thể kết nối với trang YouTube. Hãy tải lại trang.", processedSegments: 0, source: "—" }); }
+  try {
+    if (action === "start") {
+      const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId, sourceVolume }) as { ok?: boolean; message?: string };
+      if (!capture?.ok) throw new Error(capture?.message ?? "Không thể thu âm tab");
+    }
+    if (version === interactionVersion) render(await chrome.tabs.sendMessage(tabId, { action, delaySeconds, sourceVolume }) as ExtensionState);
+    if (action === "stop") await chrome.runtime.sendMessage({ action: "capture-stop" });
+  }
+  catch {
+    if (action === "start") void chrome.runtime.sendMessage({ action: "capture-stop" });
+    if (version === interactionVersion) render({ enabled: false, status: "error", message: "Không thể kết nối hoặc thu âm tab YouTube. Hãy tải lại trang.", processedSegments: 0, source: "—" });
+  }
   finally { if (version === interactionVersion) { busy = false; toggle.disabled = false; } }
 }
 

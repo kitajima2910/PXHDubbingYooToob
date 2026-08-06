@@ -1,5 +1,8 @@
 # Trạng thái PXHDubbingYooToob
 
+> Upgrade Whisper 2026-08-06: thêm `tabCapture` + offscreen MediaRecorder tạo WebM/Opus 5 giây, `/api/transcribe` dùng `whisper-large-v3-turbo`, fallback tự động khi cả transcript trang và backend đều thất bại, hàng đợi nhận dạng → dịch → Hoài My TTS, dừng capture khi caption hoạt động/dừng tab/mất focus. API key chỉ nằm backend. Smoke test Groq thật trả đúng text và timestamp; check, 8/8 test và production build đạt.
+> Manifest yêu cầu Chrome 116+ vì stream ID tạo trong service worker chỉ được dùng ở offscreen document từ phiên bản này.
+
 > Cập nhật 2026-08-06: Bổ sung fallback lấy transcript trong MAIN world qua YouTube `youtubei/v1/get_transcript`; nếu trang chưa có `params`, lấy qua `youtubei/v1/next`. Extension parse trực tiếp các `transcriptSegmentRenderer`, tránh trường hợp timedtext và fallback service worker trả mảng rỗng. Đã chạy `npm run check`, 8/8 test và production build thành công.
 > Bổ sung parser cho cả định dạng `transcriptCueRenderer` của endpoint transcript, tăng timeout bridge lên 20 giây và giữ lại đồng thời lỗi bridge/backend để popup không còn che nguyên nhân thật. Verify lại check, 8/8 test và build thành công.
 > Giữ riêng lỗi MAIN-world transcript và isolated-world timedtext để chẩn đoán chính xác; xác nhận lỗi lấy phụ đề này không phụ thuộc việc redeploy Vercel.
@@ -61,7 +64,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Bước 2: cache transcript/bản dịch bằng Neon và migration.
 - Bước 3: cache audio bằng IndexedDB.
 - Bước 4 mở rộng: bộ đệm liên tục 30–60 giây và hủy/tải lại chính xác sau seek.
-- Bước 5: tabCapture, Groq Whisper và fallback video không có phụ đề.
+- Bước 5 mở rộng: tối ưu overlap/chống trùng ở ranh giới audio chunk và đồng bộ Whisper chính xác hơn cho video tốc độ cao.
 - Bước 6: khóa job dùng chung và chống xử lý trùng giữa nhiều người dùng.
 - Fallback Web Speech khi Edge TTS lỗi.
 
