@@ -16,6 +16,7 @@ let whisperProcessing = false;
 let pendingWhisperChunk: WhisperChunk | undefined;
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
+let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
 const DEFAULT_DELAY_SECONDS = 6;
@@ -29,6 +30,29 @@ function takePendingWhisperChunk(): WhisperChunk | undefined {
 
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
 function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; renderFloatingButton(); }
+
+function speechFingerprint(text: string): string {
+  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+function rememberDubbingText(text: string): void {
+  const fingerprint = speechFingerprint(text);
+  if (fingerprint.length < 8) return;
+  const now = Date.now();
+  recentDubbingTexts = recentDubbingTexts.filter((item) => item.expiresAt > now);
+  recentDubbingTexts.push({ text: fingerprint, expiresAt: now + 45_000 });
+  if (recentDubbingTexts.length > 24) recentDubbingTexts.splice(0, recentDubbingTexts.length - 24);
+}
+
+function isDubbingFeedback(text: string): boolean {
+  const fingerprint = speechFingerprint(text);
+  if (fingerprint.length < 8) return false;
+  const now = Date.now();
+  recentDubbingTexts = recentDubbingTexts.filter((item) => item.expiresAt > now);
+  return recentDubbingTexts.some((item) => item.text === fingerprint
+    || (Math.min(item.text.length, fingerprint.length) >= 14 && (item.text.includes(fingerprint) || fingerprint.includes(item.text))));
+}
 
 const playIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>`;
 const stopIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>`;
@@ -125,7 +149,10 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   update({ status: "loading", message: "Đang nhận dạng giọng nói" });
   const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
   if (signal.aborted) return;
-  if (!result.segments.length) {
+  const vietnameseFeedback = /^(?:vi|vie|vietnamese|tiếng việt)$/i.test(result.language?.trim() ?? "")
+    && recentDubbingTexts.length > 0;
+  const sourceSegments = vietnameseFeedback ? [] : result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+  if (!sourceSegments.length) {
     update({ status: "ready", message: "Đang nghe video" });
     if (resumeAfterWhisperWarmup) {
       resumeAfterWhisperWarmup = false;
@@ -137,7 +164,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
   const desiredStartMs = capturedStartMs + whisperDelaySeconds * 1000;
   const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
-  const segments = result.segments.map((segment, index) => ({
+  const segments = sourceSegments.map((segment, index) => ({
     ...segment,
     id: `whisper-${chunkId}-${index}`,
     startMs: anchorMs + segment.startMs,
@@ -147,8 +174,10 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   const translated = await translateSegments(segments, signal);
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   await Promise.all(translated.map(async (segment) => {
-    const audio = await createSpeech(segment.translatedText ?? segment.sourceText, 1, signal);
+    const dubbingText = segment.translatedText ?? segment.sourceText;
+    const audio = await createSpeech(dubbingText, 1, signal);
     scheduler?.add(segment, audio);
+    rememberDubbingText(dubbingText);
     update({ processedSegments: state.processedSegments + 1 });
     if (resumeAfterWhisperWarmup) {
       resumeAfterWhisperWarmup = false;
@@ -223,6 +252,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
   pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  recentDubbingTexts = [];
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
@@ -274,6 +304,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   whisperMode = false; whisperProcessing = false; pendingWhisperChunk = undefined;
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  recentDubbingTexts = [];
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });

@@ -58,6 +58,8 @@ export class AudioScheduler {
 
   private play(item: ScheduledAudio): void {
     this.stopActive();
+    // At-most-once trong một timeline: nếu play/resume lỗi, tick sau không được phát lại từ đầu.
+    this.played.add(item.segment.id);
     const audio = new Audio(item.url);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
     audio.preload = "auto";

@@ -27,14 +27,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       response_format: "verbose_json",
       timestamp_granularities: ["segment"],
       temperature: 0,
-    }, { signal }), 2) as { text?: string; segments?: WhisperSegment[] };
+    }, { signal }), 2) as { text?: string; language?: string; segments?: WhisperSegment[] };
     const segments = (result.segments ?? []).flatMap((segment, index) => {
       const text = segment.text?.replace(/\s+/g, " ").trim();
       if (!text) return [];
       return [{ id: `whisper-${index}`, startMs: Math.max(0, Math.round((segment.start ?? 0) * 1000)), endMs: Math.max(500, Math.round((segment.end ?? 0) * 1000)), sourceText: text }];
     });
     if (!segments.length && result.text?.trim()) segments.push({ id: "whisper-0", startMs: 0, endMs: 5_000, sourceText: result.text.trim() });
-    res.status(200).json({ segments, source: "Groq Whisper" });
+    res.status(200).json({ segments, source: "Groq Whisper", language: result.language ?? "" });
   } catch (error) {
     console.error("Whisper thất bại", error instanceof Error ? error.message : "Lỗi không xác định");
     jsonError(res, 502, "TRANSCRIPTION_FAILED", "Không thể nhận dạng âm thanh lúc này");

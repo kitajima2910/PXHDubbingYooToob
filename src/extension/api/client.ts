@@ -41,6 +41,6 @@ export async function loadBackendCaptions(videoId: string, fromMs: number, toMs:
   return post<{ segments: SubtitleSegment[]; source: string }>("/api/subtitles/youtube", { videoId, fromMs, toMs }, signal);
 }
 
-export async function transcribeAudio(audioBase64: string, mimeType: string, signal?: AbortSignal): Promise<{ segments: SubtitleSegment[]; source: string }> {
-  return post<{ segments: SubtitleSegment[]; source: string }>("/api/transcribe", { audioBase64, mimeType }, signal);
+export async function transcribeAudio(audioBase64: string, mimeType: string, signal?: AbortSignal): Promise<{ segments: SubtitleSegment[]; source: string; language?: string }> {
+  return post<{ segments: SubtitleSegment[]; source: string; language?: string }>("/api/transcribe", { audioBase64, mimeType }, signal);
 }

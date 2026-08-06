@@ -5,6 +5,8 @@
 > Verify realtime mới: `npm run check`, 8/8 test và `npm run build` đều đạt; production bundle có content/background/offscreen/page-bridge mới.
 > Quyền tabCapture: mở popup tự chuẩn bị phiên capture ở gain 100% trong ngữ cảnh Chrome action; nút Play nổi tái sử dụng phiên này và đổi gain về 18%, tránh lỗi `Extension has not been invoked for the current page` mà không pause/làm nhỏ âm thanh khi chỉ mở popup.
 > UX loading: spinner chỉ chạy trong một thao tác khởi động Play, không quay lại ở mỗi chunk Whisper/batch nền. Whisper chỉ được phép pause warmup một lần; chunk không có lời hoặc lỗi đều tự resume video, tránh vòng lặp loading → pause.
+> Chống audio feedback: `/api/transcribe` trả thêm ngôn ngữ nhận dạng; Whisper bỏ chunk tiếng Việt sau khi TTS đã phát và content script giữ fingerprint câu dubbing 45 giây để loại transcript trùng/bao hàm. Điều này chặn vòng `TTS trong tab → tabCapture → Whisper → TTS` gây đọc lặp đoạn ngắn.
+> Scheduler chuyển sang at-most-once: đánh dấu segment đã phát ngay khi bắt đầu tạo `Audio`, nên lỗi play/resume không khiến animation tick chọn lại đoạn đó từ đầu; thao tác seek vẫn xóa dấu để đồng bộ lại timeline.
 > Giảm cold-start Whisper: giữ chunk audio 5 giây gần nhất trong lúc dò caption và xử lý ngay khi fallback được xác nhận, thay vì bỏ chunk đầu rồi chờ thêm 5 giây.
 > Dùng `public/PXH.jpg` làm logo popup và icon extension/action; asset được Vite sao chép nguyên vẹn vào production build.
 > Chrome không render ổn định JPEG trong Manifest icon; xuất từ `PXH.jpg` thành PNG chuẩn 16/32/48/128 px trong `public/icons` và chuyển `icons/default_icon` sang bộ PNG.
