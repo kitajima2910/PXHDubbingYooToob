@@ -4,9 +4,10 @@
   "name": "PXH Dubbing YooToob",
   "version": "0.1.0",
   "description": "Lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.",
+  "icons": { "16": "PXH.jpg", "32": "PXH.jpg", "48": "PXH.jpg", "128": "PXH.jpg" },
   "permissions": ["storage", "activeTab", "tabCapture", "offscreen"],
   "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://pxh-dubbing-yoo-toob.vercel.app/*"],
-  "action": { "default_popup": "popup.html", "default_title": "PXHDubbingYooToob" },
+  "action": { "default_popup": "popup.html", "default_title": "PXH Dubbing YooToob", "default_icon": { "16": "PXH.jpg", "32": "PXH.jpg" } },
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {

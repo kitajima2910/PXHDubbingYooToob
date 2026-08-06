@@ -2,6 +2,7 @@
 
 > UI 2026-08-06: chuyển Start/Stop sang nút Play nổi cố định giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup bỏ toàn bộ nút hành động, đổi tiêu đề thành `PXH Dubbing YooToob`, thiết kế dark card và chỉ giữ status/settings tự lưu bằng `chrome.storage.local`. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
 > Giảm cold-start Whisper: giữ chunk audio 5 giây gần nhất trong lúc dò caption và xử lý ngay khi fallback được xác nhận, thay vì bỏ chunk đầu rồi chờ thêm 5 giây.
+> Dùng `public/PXH.jpg` làm logo popup và icon extension/action; asset được Vite sao chép nguyên vẹn vào production build.
 
 > Upgrade Whisper 2026-08-06: thêm `tabCapture` + offscreen MediaRecorder tạo WebM/Opus 5 giây, `/api/transcribe` dùng `whisper-large-v3-turbo`, fallback tự động khi cả transcript trang và backend đều thất bại, hàng đợi nhận dạng → dịch → Hoài My TTS, dừng capture khi caption hoạt động/dừng tab/mất focus. API key chỉ nằm backend. Smoke test Groq thật trả đúng text và timestamp; check, 8/8 test và production build đạt.
 > Manifest yêu cầu Chrome 116+ vì stream ID tạo trong service worker chỉ được dùng ở offscreen document từ phiên bản này.

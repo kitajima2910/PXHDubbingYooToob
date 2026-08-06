@@ -5,7 +5,7 @@ const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
 
 app.innerHTML = `
-  <header><span class="brand-mark">PXH</span><div><h1>PXH Dubbing YooToob</h1><p>AI Vietnamese voice settings</p></div></header>
+  <header><img class="brand-mark" src="/PXH.jpg" alt="PXH logo"><div><h1>PXH Dubbing YooToob</h1><p>AI Vietnamese voice settings</p></div></header>
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong>Hoài My</strong></div>
