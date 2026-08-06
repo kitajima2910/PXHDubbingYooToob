@@ -8,6 +8,7 @@
 > Thay params phụ thuộc UI bằng protobuf transcript tự tạo từ video ID, language code và loại ASR của caption track; bỏ request `next` khỏi đường chính để giảm thời gian đứng ở “Đang tải phụ đề”.
 > Do YouTube vẫn bắt buộc PO token và trả `FAILED_PRECONDITION`, thêm fallback dùng nút Transcript chính thức của trang và parse `ytd-transcript-segment-renderer`; YouTube tự gắn token hợp lệ cho request UI.
 > Mở rộng nhận diện UI Transcript cho DOM YouTube mới và nhãn tiếng Việt/Anh; hỗ trợ `button`, `tp-yt-paper-button`, `yt-button-shape`, đồng thời báo rõ khi UI không tải được transcript.
+> Hỗ trợ DOM YouTube cập nhật tháng 3/2026: parse cả `transcript-segment-view-model` và `.yt-core-attributed-string`, bên cạnh renderer cũ; tăng thời gian chờ panel lên 7 giây.
 
 Cập nhật: 2026-08-06
 

@@ -109,10 +109,18 @@ function timestampMs(text: string): number | undefined {
 }
 
 function transcriptSegmentsFromDom(): TranscriptSegment[] {
-  const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer")];
+  const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model")];
   const segments = rows.flatMap((row, index) => {
-    const timeText = row.querySelector(".segment-timestamp")?.textContent ?? "";
-    const sourceText = (row.querySelector(".segment-text")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const attributedStrings = [...row.querySelectorAll<HTMLElement>(".yt-core-attributed-string")]
+      .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const rawText = (row.textContent ?? "").replace(/\s+/g, " ").trim();
+    const timeText = row.querySelector(".segment-timestamp, [class*='timestamp']")?.textContent
+      ?? attributedStrings.find((text) => /^\d{1,2}(?::\d{2}){1,2}$/.test(text))
+      ?? rawText.match(/^\d{1,2}(?::\d{2}){1,2}/)?.[0]
+      ?? "";
+    const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
+    const sourceText = (directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length))
+      .replace(/\s+/g, " ").trim();
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];
@@ -141,7 +149,7 @@ async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!transcriptButton) return undefined;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 70; attempt += 1) {
     segments = transcriptSegmentsFromDom();
     if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
     await new Promise((resolve) => setTimeout(resolve, 100));
