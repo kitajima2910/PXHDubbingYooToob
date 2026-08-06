@@ -267,7 +267,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
       } catch (backendError) {
         console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError);
         whisperMode = true;
-        scheduler.setSourceVolume(1);
+        // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
+        await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
         update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Groq Whisper" });
         scheduler.start();
         await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);

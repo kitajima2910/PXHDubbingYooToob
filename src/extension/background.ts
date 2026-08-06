@@ -117,6 +117,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return true;
   }
   if (request?.action === "capture-stop") { void stopTabCapture().then(() => respond({ ok: true })); return true; }
+  if (request?.action === "capture-volume") {
+    void chrome.runtime.sendMessage({ action: "capture-offscreen-volume", sourceVolume: request.sourceVolume ?? 1 })
+      .then((result) => respond(result), () => respond({ ok: false }));
+    return true;
+  }
   if (request?.action === "capture-reset") {
     void chrome.runtime.sendMessage({ action: "capture-offscreen-reset" }).then(() => respond({ ok: true }), () => respond({ ok: false }));
     return true;
