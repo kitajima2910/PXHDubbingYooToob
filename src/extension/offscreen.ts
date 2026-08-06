@@ -3,6 +3,7 @@ let recorder: MediaRecorder | undefined;
 let timer = 0;
 let targetTabId: number | undefined;
 let audioContext: AudioContext | undefined;
+let gainNode: GainNode | undefined;
 const discardedRecorders = new WeakSet<MediaRecorder>();
 
 function bufferToBase64(buffer: ArrayBuffer): string {
@@ -17,6 +18,7 @@ function stopCapture(): void {
   recorder?.stop(); recorder = undefined;
   stream?.getTracks().forEach((track) => track.stop()); stream = undefined;
   void audioContext?.close(); audioContext = undefined;
+  gainNode = undefined;
   targetTabId = undefined;
 }
 
@@ -46,6 +48,15 @@ function recordChunk(): void {
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
   const request = message as { action?: string; streamId?: string; tabId?: number; sourceVolume?: number } | null;
   if (request?.action === "capture-offscreen-stop") { stopCapture(); respond({ ok: true }); return; }
+  if (request?.action === "capture-offscreen-status") {
+    respond({ ok: true, active: stream?.active === true, tabId: targetTabId });
+    return;
+  }
+  if (request?.action === "capture-offscreen-volume") {
+    if (gainNode) gainNode.gain.value = Math.max(0, Math.min(1, request.sourceVolume ?? 1));
+    respond({ ok: Boolean(gainNode), active: stream?.active === true, tabId: targetTabId });
+    return;
+  }
   if (request?.action === "capture-offscreen-reset") {
     window.clearTimeout(timer);
     if (recorder?.state === "recording") {
@@ -64,8 +75,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
     targetTabId = request.tabId;
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
-    const gain = audioContext.createGain(); gain.gain.value = Math.max(0, Math.min(1, request.sourceVolume ?? 0.18));
-    source.connect(gain).connect(audioContext.destination);
+    gainNode = audioContext.createGain(); gainNode.gain.value = Math.max(0, Math.min(1, request.sourceVolume ?? 0.18));
+    source.connect(gainNode).connect(audioContext.destination);
     recordChunk();
     return { ok: true };
   })().then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));

@@ -17,8 +17,8 @@ app.innerHTML = `
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
 
-async function activeTab(): Promise<number | undefined> {
-  return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
+  return (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
 }
 
 function render(state?: ExtensionState): void {
@@ -29,7 +29,16 @@ function render(state?: ExtensionState): void {
   query("#statusDot").className = `status-dot ${value.status}`;
 }
 
-void activeTab().then(async (tabId) => {
-  const state = tabId ? await chrome.tabs.sendMessage(tabId, { action: "status" }).catch(() => undefined) as ExtensionState | undefined : undefined;
+void activeTab().then(async (tab) => {
+  if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
+  let state = await chrome.tabs.sendMessage(tab.id, { action: "status" }).catch(() => undefined) as ExtensionState | undefined;
+  if (!state?.enabled) {
+    const prepared = await chrome.runtime.sendMessage({ action: "capture-prepare", tabId: tab.id }) as { ok?: boolean; message?: string };
+    if (prepared?.ok) {
+      state = await chrome.tabs.sendMessage(tab.id, { action: "capture-ready" }).catch(() => state) as ExtensionState | undefined;
+    } else {
+      state = { enabled: false, status: "error", message: prepared?.message ?? "Không thể cấp quyền thu âm tab", processedSegments: 0, source: "—" };
+    }
+  }
   render(state);
 });

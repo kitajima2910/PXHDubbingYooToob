@@ -17,6 +17,16 @@ async function startTabCapture(tabId: number, sourceVolume: number): Promise<voi
   if (!response?.ok) throw new Error(response?.message ?? "Không thể bắt đầu thu âm tab");
 }
 
+async function ensureTabCapture(tabId: number, sourceVolume: number): Promise<void> {
+  await ensureOffscreenDocument();
+  const status = await chrome.runtime.sendMessage({ action: "capture-offscreen-status" }) as { active?: boolean; tabId?: number } | undefined;
+  if (status?.active && status.tabId === tabId) {
+    await chrome.runtime.sendMessage({ action: "capture-offscreen-volume", sourceVolume });
+    return;
+  }
+  await startTabCapture(tabId, sourceVolume);
+}
+
 async function stopTabCapture(): Promise<void> {
   await chrome.runtime.sendMessage({ action: "capture-offscreen-stop" }).catch(() => undefined);
 }
@@ -99,10 +109,11 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number } | null;
-  if (request?.action === "capture-start") {
-    const targetTabId = request.tabId ?? sender.tab?.id;
+  if (request?.action === "capture-start" || request?.action === "capture-prepare") {
+    const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
-    void startTabCapture(targetTabId, request.sourceVolume ?? 0.18).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
+    const sourceVolume = request.action === "capture-prepare" ? 1 : request.sourceVolume ?? 0.18;
+    void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
   if (request?.action === "capture-stop") { void stopTabCapture().then(() => respond({ ok: true })); return true; }

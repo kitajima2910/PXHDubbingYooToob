@@ -15,6 +15,7 @@ interface WhisperChunk { audioBase64: string; mimeType: string; durationMs: numb
 let whisperProcessing = false;
 let pendingWhisperChunk: WhisperChunk | undefined;
 let resumeAfterWhisperWarmup = false;
+let whisperInitialPauseDone = false;
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
 const DEFAULT_DELAY_SECONDS = 6;
@@ -35,8 +36,8 @@ const spinnerIcon = `<span class="spinner" aria-hidden="true"></span>`;
 
 function renderFloatingButton(): void {
   if (!floatingButton) return;
-  const loading = floatingBusy || (state.enabled && (state.status === "loading"
-    || (state.processedSegments === 0 && ["translating", "speaking"].includes(state.status))));
+  // Spinner chỉ dành cho thao tác khởi động; xử lý chunk/bộ đệm nền vẫn giữ nút Stop ổn định.
+  const loading = floatingBusy;
   floatingButton.innerHTML = loading ? spinnerIcon : state.enabled ? stopIcon : playIcon;
   floatingButton.dataset.active = String(state.enabled);
   floatingButton.dataset.error = String(state.status === "error");
@@ -123,7 +124,15 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   if (!video || signal.aborted || !whisperMode) return;
   update({ status: "loading", message: "Đang nhận dạng giọng nói" });
   const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
-  if (!result.segments.length || signal.aborted) { update({ status: "ready", message: "Đang nghe video" }); return; }
+  if (signal.aborted) return;
+  if (!result.segments.length) {
+    update({ status: "ready", message: "Đang nghe video" });
+    if (resumeAfterWhisperWarmup) {
+      resumeAfterWhisperWarmup = false;
+      void video.play().catch(() => undefined);
+    }
+    return;
+  }
   const chunkId = whisperChunkIndex++;
   const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
   const desiredStartMs = capturedStartMs + whisperDelaySeconds * 1000;
@@ -162,6 +171,9 @@ function queueWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): void {
     }
   })().catch((error: unknown) => {
     if (!signal.aborted) {
+      const video = document.querySelector<HTMLVideoElement>("video");
+      if (resumeAfterWhisperWarmup) void video?.play().catch(() => undefined);
+      resumeAfterWhisperWarmup = false;
       whisperMode = false;
       void chrome.runtime.sendMessage({ action: "capture-stop" });
       update({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Whisper không thể xử lý audio" });
@@ -210,7 +222,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   currentVideoId = videoId();
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
-  pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false;
+  pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
@@ -260,7 +272,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
-  whisperMode = false; whisperProcessing = false; pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false;
+  whisperMode = false; whisperProcessing = false; pendingWhisperChunk = undefined;
+  resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
@@ -271,6 +284,13 @@ function fail(message: string): ExtensionState { update({ enabled: false, status
 
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
+  if (request.action === "capture-ready") {
+    if (!state.enabled && state.status === "error" && /invoked|current page|tab.?capture/i.test(state.message)) {
+      update({ status: "idle", message: "Đã cấp quyền — nhấn Play bên trái video" });
+    }
+    respond(state);
+    return;
+  }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
     const video = document.querySelector<HTMLVideoElement>("video");
@@ -283,7 +303,8 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
         capturedEndMs: Math.round(video.currentTime * 1000),
       };
       if (whisperMode) {
-        if (state.processedSegments === 0) {
+        if (state.processedSegments === 0 && !whisperInitialPauseDone) {
+          whisperInitialPauseDone = true;
           resumeAfterWhisperWarmup = true;
           video.pause();
         }
