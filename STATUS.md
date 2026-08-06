@@ -10,6 +10,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 
 - Tạo project Vite + TypeScript strict và Chrome Extension Manifest V3.
 - Tạo popup tiếng Việt với bật/tắt, trạng thái, nguồn phụ đề, số đoạn, độ trễ và âm lượng gốc.
+- Nút bắt đầu cập nhật ngay ở lần nhấn đầu, bị khóa trong lúc khởi động và không còn bị phản hồi trạng thái cũ ghi đè.
 - Phát hiện track phụ đề YouTube, ưu tiên phụ đề tiếng Việt hoặc phụ đề thủ công.
 - Parse caption JSON3 thành các đoạn có timestamp.
 - Parser phụ đề đọc an toàn và fallback XML khi YouTube trả JSON3 rỗng/không hợp lệ.
@@ -21,6 +22,7 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Bộ đệm liên tục ưu tiên batch 8 câu gần `video.currentTime`, chuẩn bị cửa sổ 45 giây, lấy transcript backend theo vùng 60 giây và nạp batch kế tiếp sau 250 ms; khi đủ bộ đệm mới chờ 4 giây kiểm tra lại.
 - Scheduler không cắt câu Việt ngay khi timestamp câu sau tới; tốc độ được tính từ thời lượng MP3 thật và chỉ resync khi câu vượt khung quá 3 giây.
 - Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x, bỏ qua câu đến trễ quá 800 ms thay vì đọc đuổi và resync khi vượt khung quá 3 giây.
+- Khi tab YouTube bị ẩn, video được pause ngay và dubbing pause theo; khi quay lại không tự phát tiếp để tránh âm thanh chạy nền hoặc sai đồng bộ.
 - Lập lịch theo `video.currentTime`; xử lý pause/resume, seek, playback rate và chuyển video.
 - Giảm âm lượng video gốc trong khi audio Việt phát và khôi phục khi dừng.
 - Backend có Zod validation, giới hạn payload, rate limit cơ bản, timeout, retry/backoff và lỗi JSON có cấu trúc.

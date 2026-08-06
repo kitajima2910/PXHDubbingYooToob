@@ -132,3 +132,10 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
 });
 
 setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden || !state.enabled) return;
+  const video = document.querySelector<HTMLVideoElement>("video");
+  if (video && !video.paused) video.pause();
+  update({ status: "ready", message: "Đã tạm dừng vì tab không hoạt động" });
+});

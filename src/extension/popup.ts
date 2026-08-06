@@ -16,6 +16,9 @@ app.innerHTML = `
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
 const toggle = query<HTMLButtonElement>("#toggle");
 const retry = query<HTMLButtonElement>("#retry");
+let currentState: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
+let busy = false;
+let interactionVersion = 0;
 
 async function activeTab(): Promise<number | undefined> {
   return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
@@ -23,6 +26,7 @@ async function activeTab(): Promise<number | undefined> {
 
 function render(state?: ExtensionState): void {
   const value = state ?? { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
+  currentState = value;
   query("#status").textContent = value.message;
   query("#source").textContent = value.source;
   query("#count").textContent = `${value.processedSegments} đoạn`;
@@ -31,18 +35,31 @@ function render(state?: ExtensionState): void {
 }
 
 async function send(action: "start" | "stop"): Promise<void> {
+  if (busy) return;
+  busy = true;
+  const version = ++interactionVersion;
+  toggle.disabled = true;
+  render({ ...currentState, enabled: action === "start", status: action === "start" ? "loading" : "idle", message: action === "start" ? "Đang tải phụ đề" : "Đang dừng lồng tiếng" });
   const tabId = await activeTab();
-  if (!tabId) return render({ enabled: false, status: "error", message: "Hãy mở một video YouTube", processedSegments: 0, source: "—" });
+  if (!tabId) {
+    render({ enabled: false, status: "error", message: "Hãy mở một video YouTube", processedSegments: 0, source: "—" });
+    busy = false; toggle.disabled = false; return;
+  }
   const delaySeconds = Number(query<HTMLInputElement>("#delay").value);
   const sourceVolume = Number(query<HTMLInputElement>("#volume").value) / 100;
-  try { render(await chrome.tabs.sendMessage(tabId, { action, delaySeconds, sourceVolume }) as ExtensionState); }
-  catch { render({ enabled: false, status: "error", message: "Không thể kết nối với trang YouTube. Hãy tải lại trang.", processedSegments: 0, source: "—" }); }
+  try { if (version === interactionVersion) render(await chrome.tabs.sendMessage(tabId, { action, delaySeconds, sourceVolume }) as ExtensionState); }
+  catch { if (version === interactionVersion) render({ enabled: false, status: "error", message: "Không thể kết nối với trang YouTube. Hãy tải lại trang.", processedSegments: 0, source: "—" }); }
+  finally { if (version === interactionVersion) { busy = false; toggle.disabled = false; } }
 }
 
-toggle.addEventListener("click", async () => send(toggle.textContent?.startsWith("Dừng") ? "stop" : "start"));
+toggle.addEventListener("click", async () => send(currentState.enabled ? "stop" : "start"));
 retry.addEventListener("click", async () => send("start"));
 for (const id of ["delay", "volume"] as const) query<HTMLInputElement>(`#${id}`).addEventListener("input", (event) => {
   const input = event.currentTarget as HTMLInputElement;
   query(`#${id}Value`).textContent = id === "delay" ? `${input.value} giây` : `${input.value}%`;
 });
-void activeTab().then(async (tabId) => tabId && render(await chrome.tabs.sendMessage(tabId, { action: "status" }).catch(() => undefined)));
+const initialVersion = interactionVersion;
+void activeTab().then(async (tabId) => {
+  const result = tabId ? await chrome.tabs.sendMessage(tabId, { action: "status" }).catch(() => undefined) as ExtensionState | undefined : undefined;
+  if (initialVersion === interactionVersion) render(result);
+});
