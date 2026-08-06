@@ -114,9 +114,12 @@ function removeTranscriptTimestamps(text: string): string {
 
 function hideTranscriptPanel(): void {
   const panel = document.querySelector<HTMLElement>("ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']");
-  const closeButton = panel?.querySelector<HTMLElement>("#visibility-button button, button[aria-label*='Close' i], button[aria-label*='Đóng' i]");
-  if (closeButton) closeButton.click();
-  else panel?.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN");
+  if (!panel) return;
+  // Giữ transcript trong DOM để tiếp tục đọc mà không chiếm diện tích giao diện.
+  for (const [property, value] of Object.entries({
+    width: "0px", height: "0px", minWidth: "0px", minHeight: "0px", maxWidth: "0px", maxHeight: "0px",
+    overflow: "hidden", opacity: "0", pointerEvents: "none", position: "absolute",
+  })) panel.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value, "important");
 }
 
 function transcriptSegmentsFromDom(): TranscriptSegment[] {
@@ -135,7 +138,9 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];
   });
-  return segments.map((segment, index) => ({ ...segment, endMs: segments[index + 1]?.startMs ?? segment.endMs }));
+  const unique = [...new Map(segments.map((segment) => [`${segment.startMs}:${segment.sourceText}`, segment])).values()]
+    .sort((left, right) => left.startMs - right.startMs);
+  return unique.map((segment, index) => ({ ...segment, endMs: unique[index + 1]?.startMs ?? segment.endMs }));
 }
 
 async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {

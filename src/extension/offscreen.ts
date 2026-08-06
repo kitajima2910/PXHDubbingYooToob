@@ -3,6 +3,7 @@ let recorder: MediaRecorder | undefined;
 let timer = 0;
 let targetTabId: number | undefined;
 let audioContext: AudioContext | undefined;
+const discardedRecorders = new WeakSet<MediaRecorder>();
 
 function bufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -28,6 +29,10 @@ function recordChunk(): void {
   recorder = current;
   current.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
   current.addEventListener("stop", () => {
+    if (discardedRecorders.has(current)) {
+      if (stream?.active) recordChunk();
+      return;
+    }
     if (!chunks.length || targetTabId === undefined) return;
     const durationMs = Date.now() - startedAt;
     void new Blob(chunks, { type: mimeType }).arrayBuffer().then((buffer) => chrome.runtime.sendMessage({
@@ -41,6 +46,15 @@ function recordChunk(): void {
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
   const request = message as { action?: string; streamId?: string; tabId?: number; sourceVolume?: number } | null;
   if (request?.action === "capture-offscreen-stop") { stopCapture(); respond({ ok: true }); return; }
+  if (request?.action === "capture-offscreen-reset") {
+    window.clearTimeout(timer);
+    if (recorder?.state === "recording") {
+      discardedRecorders.add(recorder);
+      recorder.stop();
+    } else if (stream?.active) recordChunk();
+    respond({ ok: true });
+    return;
+  }
   if (request?.action !== "capture-offscreen-start" || !request.streamId || request.tabId === undefined) return;
   void (async () => {
     stopCapture();

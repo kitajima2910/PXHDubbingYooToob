@@ -11,14 +11,16 @@ let currentVideoId = "";
 let whisperMode = false;
 let whisperDelaySeconds = 5;
 let whisperChunkIndex = 0;
-let whisperQueue: Promise<void> = Promise.resolve();
-let pendingWhisperChunk: { audioBase64: string; mimeType: string } | undefined;
+interface WhisperChunk { audioBase64: string; mimeType: string; durationMs: number; capturedEndMs: number }
+let whisperProcessing = false;
+let pendingWhisperChunk: WhisperChunk | undefined;
+let resumeAfterWhisperWarmup = false;
 let floatingButton: HTMLButtonElement | undefined;
 let floatingBusy = false;
 const DEFAULT_DELAY_SECONDS = 6;
 const DEFAULT_SOURCE_VOLUME = 0.18;
 
-function takePendingWhisperChunk(): { audioBase64: string; mimeType: string } | undefined {
+function takePendingWhisperChunk(): WhisperChunk | undefined {
   const chunk = pendingWhisperChunk;
   pendingWhisperChunk = undefined;
   return chunk;
@@ -33,7 +35,8 @@ const spinnerIcon = `<span class="spinner" aria-hidden="true"></span>`;
 
 function renderFloatingButton(): void {
   if (!floatingButton) return;
-  const loading = floatingBusy || (state.enabled && ["loading", "translating", "speaking"].includes(state.status));
+  const loading = floatingBusy || (state.enabled && (state.status === "loading"
+    || (state.processedSegments === 0 && ["translating", "speaking"].includes(state.status))));
   floatingButton.innerHTML = loading ? spinnerIcon : state.enabled ? stopIcon : playIcon;
   floatingButton.dataset.active = String(state.enabled);
   floatingButton.dataset.error = String(state.status === "error");
@@ -115,14 +118,16 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
   return candidates.length;
 }
 
-async function processWhisperChunk(audioBase64: string, mimeType: string, signal: AbortSignal): Promise<void> {
+async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Promise<void> {
   const video = document.querySelector<HTMLVideoElement>("video");
   if (!video || signal.aborted || !whisperMode) return;
   update({ status: "loading", message: "Đang nhận dạng giọng nói" });
-  const result = await transcribeAudio(audioBase64, mimeType, signal);
+  const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
   if (!result.segments.length || signal.aborted) { update({ status: "ready", message: "Đang nghe video" }); return; }
   const chunkId = whisperChunkIndex++;
-  const anchorMs = Math.round(video.currentTime * 1000 + whisperDelaySeconds * 1000);
+  const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
+  const desiredStartMs = capturedStartMs + whisperDelaySeconds * 1000;
+  const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
   const segments = result.segments.map((segment, index) => ({
     ...segment,
     id: `whisper-${chunkId}-${index}`,
@@ -136,17 +141,35 @@ async function processWhisperChunk(audioBase64: string, mimeType: string, signal
     const audio = await createSpeech(segment.translatedText ?? segment.sourceText, 1, signal);
     scheduler?.add(segment, audio);
     update({ processedSegments: state.processedSegments + 1 });
+    if (resumeAfterWhisperWarmup) {
+      resumeAfterWhisperWarmup = false;
+      void video.play().catch(() => undefined);
+    }
   }));
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
 }
 
-function queueWhisperChunk(audioBase64: string, mimeType: string, signal: AbortSignal): void {
-  whisperQueue = whisperQueue.then(() => processWhisperChunk(audioBase64, mimeType, signal)).catch((error: unknown) => {
+function queueWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): void {
+  // Giữ chunk mới nhất thay vì để backend xử lý một hàng đợi cũ ngày càng dài.
+  pendingWhisperChunk = chunk;
+  if (whisperProcessing) return;
+  whisperProcessing = true;
+  void (async () => {
+    while (!signal.aborted && whisperMode) {
+      const next = takePendingWhisperChunk();
+      if (!next) break;
+      await processWhisperChunk(next, signal);
+    }
+  })().catch((error: unknown) => {
     if (!signal.aborted) {
       whisperMode = false;
       void chrome.runtime.sendMessage({ action: "capture-stop" });
       update({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Whisper không thể xử lý audio" });
     }
+  }).finally(() => {
+    whisperProcessing = false;
+    const latest = takePendingWhisperChunk();
+    if (latest && !signal.aborted && whisperMode) queueWhisperChunk(latest, signal);
   });
 }
 
@@ -182,9 +205,12 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   await stop(false);
   const video = document.querySelector<HTMLVideoElement>("video");
   if (!video || !videoId()) return fail("Không tìm thấy video YouTube");
+  const resumeWhenReady = !video.paused;
+  if (resumeWhenReady) video.pause();
   currentVideoId = videoId();
   controller = new AbortController();
-  whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperQueue = Promise.resolve(); pendingWhisperChunk = undefined;
+  whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
+  pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false;
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
@@ -202,10 +228,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
         scheduler.setSourceVolume(1);
         update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Groq Whisper" });
         scheduler.start();
-        const chunk = takePendingWhisperChunk();
-        if (chunk) {
-          queueWhisperChunk(chunk.audioBase64, chunk.mimeType, sessionController.signal);
-        }
+        await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+        if (resumeWhenReady) void video.play().catch(() => undefined);
         return state;
       }
     }
@@ -218,6 +242,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     const completion = buildWindow(captions.segments, video, sessionController.signal, queued, markFirstAudio);
     const completedBeforeAudio = await Promise.race([firstAudio.then(() => false), completion.then(() => true)]);
     if (completedBeforeAudio && state.processedSegments === 0) throw new Error("Không thể tạo audio cho các câu sắp phát");
+    if (resumeWhenReady && !sessionController.signal.aborted) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
     void completion.then(() => {
       if (controller === sessionController && !sessionController.signal.aborted) {
@@ -227,6 +252,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     })
       .catch((error: unknown) => { if (controller === sessionController && !sessionController.signal.aborted) fail(error instanceof Error ? error.message : "Không thể tạo bộ đệm"); });
   } catch (error) {
+    if (resumeWhenReady && video.paused) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) fail(error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng");
   }
   return state;
@@ -234,7 +260,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
-  whisperMode = false; whisperQueue = Promise.resolve(); pendingWhisperChunk = undefined;
+  whisperMode = false; whisperProcessing = false; pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
@@ -243,14 +269,26 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
   if (request.action === "whisper-chunk") {
     const chunk = request as typeof request & { audioBase64?: string; mimeType?: string };
-    if (controller && chunk.audioBase64 && chunk.mimeType) {
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (controller && video && !video.paused && chunk.audioBase64 && chunk.mimeType) {
       const signal = controller.signal;
-      if (whisperMode) queueWhisperChunk(chunk.audioBase64, chunk.mimeType, signal);
-      else pendingWhisperChunk = { audioBase64: chunk.audioBase64, mimeType: chunk.mimeType };
+      const whisperChunk: WhisperChunk = {
+        audioBase64: chunk.audioBase64,
+        mimeType: chunk.mimeType,
+        durationMs: Math.max(500, request.durationMs ?? 5_000),
+        capturedEndMs: Math.round(video.currentTime * 1000),
+      };
+      if (whisperMode) {
+        if (state.processedSegments === 0) {
+          resumeAfterWhisperWarmup = true;
+          video.pause();
+        }
+        queueWhisperChunk(whisperChunk, signal);
+      } else pendingWhisperChunk = whisperChunk;
     }
     respond({ ok: true }); return;
   }

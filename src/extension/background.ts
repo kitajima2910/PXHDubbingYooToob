@@ -106,6 +106,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return true;
   }
   if (request?.action === "capture-stop") { void stopTabCapture().then(() => respond({ ok: true })); return true; }
+  if (request?.action === "capture-reset") {
+    void chrome.runtime.sendMessage({ action: "capture-offscreen-reset" }).then(() => respond({ ok: true }), () => respond({ ok: false }));
+    return true;
+  }
   if (request?.action === "capture-chunk" && request.tabId !== undefined && request.audioBase64 && request.mimeType && request.durationMs) {
     void chrome.tabs.sendMessage(request.tabId, { action: "whisper-chunk", audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs }).catch(() => undefined);
     respond({ ok: true }); return;

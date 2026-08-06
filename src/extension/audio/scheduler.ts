@@ -33,7 +33,11 @@ export class AudioScheduler {
     this.sourceVolume = value;
     if (this.frame) this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
   }
-  add(segment: SubtitleSegment, blob: Blob): void { this.items.set(segment.id, { segment, url: URL.createObjectURL(blob) }); }
+  add(segment: SubtitleSegment, blob: Blob): void {
+    const previous = this.items.get(segment.id);
+    if (previous) URL.revokeObjectURL(previous.url);
+    this.items.set(segment.id, { segment, url: URL.createObjectURL(blob) });
+  }
 
   start(): void {
     this.stopLoop();
