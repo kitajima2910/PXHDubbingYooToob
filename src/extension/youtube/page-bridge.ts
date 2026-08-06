@@ -103,7 +103,7 @@ function generatedTranscriptParams(videoId: string, languageCode: string, autoGe
 }
 
 function timestampMs(text: string): number | undefined {
-  const parts = text.trim().split(":").map(Number);
+  const parts = text.trim().split(/[:.：]/).map(Number);
   if (!parts.length || parts.some((part) => !Number.isFinite(part))) return undefined;
   return Math.round(parts.reduce((total, part) => total * 60 + part, 0) * 1000);
 }
@@ -115,13 +115,13 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
       .map((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
     const rawText = (row.textContent ?? "").replace(/\s+/g, " ").trim();
     const timeText = row.querySelector(".segment-timestamp, [class*='timestamp']")?.textContent
-      ?? attributedStrings.find((text) => /^\d{1,2}(?::\d{2}){1,2}$/.test(text))
-      ?? rawText.match(/^\d{1,2}(?::\d{2}){1,2}/)?.[0]
+      ?? attributedStrings.find((text) => /^\d{1,2}(?:[:.：]\d{2}){1,2}$/.test(text))
+      ?? rawText.match(/^\d{1,2}(?:[:.：]\d{2}){1,2}/)?.[0]
       ?? "";
     const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
     const sourceText = (directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText.slice(timeText.length))
       .replace(/\s+/g, " ").trim()
-      .replace(/^\d{1,2}(?::\d{2}){1,2}\s*/, "").trim();
+      .replace(/^\d{1,2}(?:[:.：]\d{2}){1,2}\s*/, "").trim();
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];
     return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];

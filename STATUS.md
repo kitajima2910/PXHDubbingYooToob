@@ -10,6 +10,7 @@
 > Mở rộng nhận diện UI Transcript cho DOM YouTube mới và nhãn tiếng Việt/Anh; hỗ trợ `button`, `tp-yt-paper-button`, `yt-button-shape`, đồng thời báo rõ khi UI không tải được transcript.
 > Hỗ trợ DOM YouTube cập nhật tháng 3/2026: parse cả `transcript-segment-view-model` và `.yt-core-attributed-string`, bên cạnh renderer cũ; tăng thời gian chờ panel lên 7 giây.
 > Loại timestamp dạng `m:ss`/`h:mm:ss` ở đầu text của renderer mới trước khi dịch và TTS, tránh giọng đọc đọc luôn số giây trong Bản chép lời.
+> Hỗ trợ thêm timestamp dùng dấu chấm hoặc dấu hai chấm Unicode (`0.51`, `0：51`) trong cả parser thời gian và bước loại timestamp khỏi nội dung.
 
 Cập nhật: 2026-08-06
 
