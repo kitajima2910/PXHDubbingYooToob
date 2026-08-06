@@ -19,7 +19,8 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Tạo MP3 theo từng câu qua provider Edge TTS, giọng mặc định `vi-VN-HoaiMyNeural`.
 - TTS chạy tối đa 3 request đồng thời; scheduler bật trước và popup chuyển sang “Sẵn sàng” ngay khi audio đầu tiên vào bộ đệm, phần còn lại tiếp tục tạo nền.
 - Bộ đệm liên tục ưu tiên batch 8 câu gần `video.currentTime`, chuẩn bị cửa sổ 45 giây, lấy transcript backend theo vùng 60 giây và nạp batch kế tiếp sau 250 ms; khi đủ bộ đệm mới chờ 4 giây kiểm tra lại.
-- Scheduler không cắt câu Việt khi timestamp câu sau tới; tốc độ được tính từ thời lượng MP3 thật trong khoảng 0.85–1.30 và chỉ resync khi câu vượt khung quá 6 giây.
+- Scheduler không cắt câu Việt ngay khi timestamp câu sau tới; tốc độ được tính từ thời lượng MP3 thật và chỉ resync khi câu vượt khung quá 3 giây.
+- Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x, bỏ qua câu đến trễ quá 800 ms thay vì đọc đuổi và resync khi vượt khung quá 3 giây.
 - Lập lịch theo `video.currentTime`; xử lý pause/resume, seek, playback rate và chuyển video.
 - Giảm âm lượng video gốc trong khi audio Việt phát và khôi phục khi dừng.
 - Backend có Zod validation, giới hạn payload, rate limit cơ bản, timeout, retry/backoff và lỗi JSON có cấu trúc.

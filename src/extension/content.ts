@@ -35,10 +35,8 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
       while (!signal.aborted) {
         const segment = translated[nextIndex++];
         if (!segment) return;
-        const durationSeconds = Math.max(0.5, (segment.endMs - segment.startMs) / 1000);
-        const rate = Math.min(1.3, Math.max(0.85, segment.sourceText.length / (durationSeconds * 14)));
         try {
-          const audio = await createSpeech(segment.translatedText ?? segment.sourceText, rate, signal);
+          const audio = await createSpeech(segment.translatedText ?? segment.sourceText, 1, signal);
           scheduler?.add(segment, audio);
           update({ processedSegments: state.processedSegments + 1 });
           if (state.processedSegments === 1) onFirstAudio();

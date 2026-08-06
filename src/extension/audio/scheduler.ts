@@ -1,11 +1,17 @@
 import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url: string }
-const MAX_OVERRUN_MS = 6_000;
+const MAX_OVERRUN_MS = 3_000;
+const MAX_START_LATENESS_MS = 800;
+const MIN_SMOOTH_RATE = 0.95;
+const MAX_SMOOTH_RATE = 1.15;
 
 export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs: number, videoRate: number): number {
-  if (!Number.isFinite(audioDurationSeconds) || audioDurationSeconds <= 0) return Math.min(1.3, Math.max(0.85, videoRate));
-  return Math.min(1.3, Math.max(0.85, (audioDurationSeconds / Math.max(0.5, slotDurationMs / 1000)) * videoRate));
+  const naturalRate = !Number.isFinite(audioDurationSeconds) || audioDurationSeconds <= 0
+    ? 1
+    : audioDurationSeconds / Math.max(0.5, slotDurationMs / 1000);
+  const smoothRate = Math.min(MAX_SMOOTH_RATE, Math.max(MIN_SMOOTH_RATE, naturalRate));
+  return Math.min(1.3, Math.max(0.85, smoothRate * videoRate));
 }
 
 export class AudioScheduler {
@@ -30,6 +36,9 @@ export class AudioScheduler {
     this.stopLoop();
     const tick = (): void => {
       const now = this.video.currentTime * 1000;
+      for (const { segment } of this.items.values()) {
+        if (segment.startMs < now - MAX_START_LATENESS_MS) this.played.add(segment.id);
+      }
       const match = !this.active ? [...this.items.values()].find(({ segment }) => now >= segment.startMs && now < segment.endMs && !this.played.has(segment.id)) : undefined;
       if (match && !this.video.paused) this.play(match);
       if (this.active && now > Number(this.active.audio.dataset.endMs) + MAX_OVERRUN_MS) this.finishActive();
