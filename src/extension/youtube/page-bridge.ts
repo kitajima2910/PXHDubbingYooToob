@@ -102,7 +102,46 @@ function generatedTranscriptParams(videoId: string, languageCode: string, autoGe
   return encodeURIComponent(base64);
 }
 
+function timestampMs(text: string): number | undefined {
+  const parts = text.trim().split(":").map(Number);
+  if (!parts.length || parts.some((part) => !Number.isFinite(part))) return undefined;
+  return Math.round(parts.reduce((total, part) => total * 60 + part, 0) * 1000);
+}
+
+function transcriptSegmentsFromDom(): TranscriptSegment[] {
+  const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer")];
+  const segments = rows.flatMap((row, index) => {
+    const timeText = row.querySelector(".segment-timestamp")?.textContent ?? "";
+    const sourceText = (row.querySelector(".segment-text")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const startMs = timestampMs(timeText);
+    if (startMs === undefined || !sourceText) return [];
+    return [{ id: `dom-${startMs}-${index}`, startMs, endMs: startMs + 2000, sourceText }];
+  });
+  return segments.map((segment, index) => ({ ...segment, endMs: segments[index + 1]?.startMs ?? segment.endMs }));
+}
+
+async function transcriptPayloadFromUi(): Promise<CaptionPayload | undefined> {
+  let segments = transcriptSegmentsFromDom();
+  if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+
+  const expander = document.querySelector<HTMLElement>("ytd-watch-metadata ytd-text-inline-expander #expand");
+  expander?.click();
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const button = document.querySelector<HTMLElement>("ytd-video-description-transcript-section-renderer button");
+    if (button) { button.click(); break; }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    segments = transcriptSegmentsFromDom();
+    if (segments.length) return { text: JSON.stringify({ segments }), format: "segments", source: "YouTube transcript" };
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return undefined;
+}
+
 async function transcriptPayload(track?: PageCaptionTrack): Promise<CaptionPayload> {
+  const uiPayload = await transcriptPayloadFromUi();
+  if (uiPayload) return uiPayload;
   const apiKey = configValue("INNERTUBE_API_KEY");
   const context = configValue("INNERTUBE_CONTEXT");
   if (typeof apiKey !== "string" || !context || typeof context !== "object") throw new Error("YouTube chưa cung cấp cấu hình transcript");

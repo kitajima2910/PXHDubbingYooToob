@@ -6,6 +6,7 @@
 > Sửa HTTP 400 của `get_transcript`: luôn lấy transcript params mới từ `youtubei/v1/next` theo video ID hiện tại (tránh dữ liệu SPA cũ), gửi client/version/visitor headers của phiên YouTube và hiển thị response lỗi rút gọn nếu endpoint vẫn từ chối.
 > Sửa `FAILED_PRECONDITION`: giữ `clickTrackingParams` đi cùng `getTranscriptEndpoint`, đưa vào `context.clickTracking` và thêm `x-goog-api-format-version: 2` giống request InnerTube của YouTube.
 > Thay params phụ thuộc UI bằng protobuf transcript tự tạo từ video ID, language code và loại ASR của caption track; bỏ request `next` khỏi đường chính để giảm thời gian đứng ở “Đang tải phụ đề”.
+> Do YouTube vẫn bắt buộc PO token và trả `FAILED_PRECONDITION`, thêm fallback dùng nút Transcript chính thức của trang và parse `ytd-transcript-segment-renderer`; YouTube tự gắn token hợp lệ cho request UI.
 
 Cập nhật: 2026-08-06
 
