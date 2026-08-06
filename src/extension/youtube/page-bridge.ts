@@ -225,6 +225,10 @@ async function captionPayload(): Promise<CaptionPayload> {
   }
   const tracks = response?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
   const track = tracks.find((item) => item.languageCode === "vi") ?? tracks.find((item) => item.kind !== "asr") ?? tracks[0];
+  if (track) {
+    const domTranscript = await transcriptPayloadFromUi();
+    if (domTranscript) return domTranscript;
+  }
   if (!track?.baseUrl.startsWith("https://www.youtube.com/api/timedtext")) return transcriptPayload(track);
   const source = track.kind === "asr" ? "YouTube (tự động)" : "YouTube";
 

@@ -1,5 +1,7 @@
 # Trạng thái PXHDubbingYooToob
 
+> Đồng bộ 2026-08-07: ưu tiên transcript DOM trước timedtext/backend, giữ nguyên từng cue và timestamp YouTube; popup hiển thị `Transcript — đồng bộ`. Video không có transcript dùng chunk Whisper 5 giây; hàng đợi đổi từ latest-wins sang FIFO để không ghi đè/bỏ mất lời khi xử lý chậm, popup hiển thị `Whisper — trễ khoảng 5–8 giây`. Đã chạy typecheck, 8/8 test và production build thành công.
+
 > UI 2026-08-06: gỡ hoàn toàn nút nổi khỏi trang YouTube để không che video; Start/Stop chuyển lại thành nút toàn chiều rộng trong popup `PXH Dubbing YooToob`, cùng trạng thái và BYOK. Popup tự xin tabCapture ngay khi người dùng nhấn Start, dùng độ trễ Whisper 4 giây và âm gốc 8%.
 > BYOK Groq: popup cho nhập/lưu/xóa API key riêng trong `chrome.storage.local` (password field, không hiển thị lại). Service worker ưu tiên key riêng và gọi thẳng `api.groq.com` cho translate/Whisper; key không qua content script hay Vercel. Khi không có key riêng, giữ nguyên backend/key mặc định. Manifest chỉ bổ sung host permission chính thức của Groq.
 > Verify BYOK: `npm run check`, 8/8 test và production build đạt; bundle popup/background mới đã sinh thành công. Key riêng chỉ được đọc trong popup/service worker, không được gửi sang content script hoặc ghi log.

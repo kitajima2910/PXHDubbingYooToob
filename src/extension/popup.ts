@@ -10,10 +10,10 @@ app.innerHTML = `
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong>Hoài My</strong></div>
-    <div><span>Nguồn</span><strong id="source">—</strong></div>
+    <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Độ trễ tự động</span><strong>4 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Đồng bộ</span><strong>Transcript hoặc Whisper 5 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
@@ -94,8 +94,8 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
       return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
-    const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 4, sourceVolume: 0.08 }) as ExtensionState;
-    if (result.source === "Groq Whisper" && !capture?.ok) {
+    const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
+    if (result.source.startsWith("Whisper") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);
       throw new Error(capture?.message ?? "Không thể cấp quyền thu âm tab");
     }

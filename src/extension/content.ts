@@ -13,17 +13,15 @@ let whisperDelaySeconds = 5;
 let whisperChunkIndex = 0;
 interface WhisperChunk { audioBase64: string; mimeType: string; durationMs: number; capturedEndMs: number }
 let whisperProcessing = false;
-let pendingWhisperChunk: WhisperChunk | undefined;
+let whisperQueue: WhisperChunk[] = [];
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
-const DEFAULT_DELAY_SECONDS = 4;
+const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
-  const chunk = pendingWhisperChunk;
-  pendingWhisperChunk = undefined;
-  return chunk;
+  return whisperQueue.shift();
 }
 
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
@@ -132,9 +130,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
 }
 
-function queueWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): void {
-  // Giữ chunk mới nhất thay vì để backend xử lý một hàng đợi cũ ngày càng dài.
-  pendingWhisperChunk = chunk;
+function drainWhisperQueue(signal: AbortSignal): void {
   if (whisperProcessing) return;
   whisperProcessing = true;
   void (async () => {
@@ -154,9 +150,15 @@ function queueWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): void {
     }
   }).finally(() => {
     whisperProcessing = false;
-    const latest = takePendingWhisperChunk();
-    if (latest && !signal.aborted && whisperMode) queueWhisperChunk(latest, signal);
+    if (whisperQueue.length && !signal.aborted && whisperMode) drainWhisperQueue(signal);
   });
+}
+
+function queueWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): void {
+  // FIFO preserves every 5-second window. Replacing the pending item caused
+  // complete phrases to disappear whenever recognition/TTS took over 5 seconds.
+  whisperQueue.push(chunk);
+  drainWhisperQueue(signal);
 }
 
 async function bufferContinuously(
@@ -196,7 +198,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   currentVideoId = videoId();
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
-  pendingWhisperChunk = undefined; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   const sessionController = controller;
   scheduler = new AudioScheduler(video, sourceVolume);
@@ -214,7 +216,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
         whisperMode = true;
         // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
         await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
-        update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Groq Whisper" });
+        update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
         scheduler.start();
         await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
         if (resumeWhenReady) void video.play().catch(() => undefined);
@@ -222,7 +224,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
       }
     }
     void chrome.runtime.sendMessage({ action: "capture-stop" });
-    update({ source: captions.source });
+    update({ source: "Transcript — đồng bộ" });
     scheduler.start();
     const queued = new Set<string>();
     let markFirstAudio!: () => void;
@@ -248,7 +250,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
-  whisperMode = false; whisperProcessing = false; pendingWhisperChunk = undefined;
+  whisperMode = false; whisperProcessing = false; whisperQueue = [];
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
@@ -269,7 +271,7 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
       const whisperChunk: WhisperChunk = {
         audioBase64: chunk.audioBase64,
         mimeType: chunk.mimeType,
-        durationMs: Math.max(500, request.durationMs ?? 4_000),
+        durationMs: Math.max(500, request.durationMs ?? 5_000),
         capturedEndMs: Math.round(video.currentTime * 1000),
       };
       if (whisperMode) {
@@ -279,7 +281,7 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
           video.pause();
         }
         queueWhisperChunk(whisperChunk, signal);
-      } else pendingWhisperChunk = whisperChunk;
+      } else whisperQueue.push(whisperChunk);
     }
     respond({ ok: true }); return;
   }

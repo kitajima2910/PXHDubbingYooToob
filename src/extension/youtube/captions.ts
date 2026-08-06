@@ -117,7 +117,15 @@ export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment
         .map((segment) => ({ ...segment, sourceText: removeTranscriptTimestamps(segment.sourceText) }))
         .filter((segment) => Number.isFinite(segment.startMs) && Number.isFinite(segment.endMs) && typeof segment.sourceText === "string" && segment.sourceText.trim());
       if (!segments.length) throw new Error("Transcript YouTube không có nội dung");
-      return { segments: mergeOverlappingSegments(segments), source: payload.source };
+      // DOM transcript rows already carry YouTube's timeline. Preserve each cue
+      // boundary so playback starts at the cue's actual timestamp.
+      const timedSegments = [...segments]
+        .sort((left, right) => left.startMs - right.startMs)
+        .map((segment, index, sorted) => ({
+          ...segment,
+          endMs: Math.max(segment.startMs + 500, sorted[index + 1]?.startMs ?? segment.endMs),
+        }));
+      return { segments: timedSegments, source: "Transcript — đồng bộ" };
     }
     data = payload.format === "json3" ? (parseJson3(payload.text) ?? {}) : (parseXml(payload.text) ?? {});
     source = payload.source;
