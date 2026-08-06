@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "PXHDubbingYooToob",
+  "version": "0.1.0",
+  "description": "Lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*", "https://*.vercel.app/*"],
+  "action": { "default_popup": "popup.html", "default_title": "PXHDubbingYooToob" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
