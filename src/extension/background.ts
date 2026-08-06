@@ -44,6 +44,77 @@ function bufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+interface DirectApiResult { ok: boolean; status: number; data?: unknown; message?: string; retryAfterMs?: number }
+
+function retryAfterMs(value: string | null): number {
+  if (!value) return 5 * 60_000;
+  const seconds = Number(value);
+  const duration = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - Date.now();
+  return Math.min(24 * 60 * 60_000, Math.max(30_000, Number.isFinite(duration) ? duration : 5 * 60_000));
+}
+
+async function groqError(response: Response): Promise<DirectApiResult> {
+  const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+  return {
+    ok: false, status: response.status,
+    message: payload?.error?.message ?? `Groq trả lỗi ${response.status}`,
+    retryAfterMs: retryAfterMs(response.headers.get("retry-after")),
+  };
+}
+
+async function requestGroqDirect(path: string, body: unknown, apiKey: string, signal: AbortSignal): Promise<DirectApiResult> {
+  if (path === "/api/translate") {
+    const input = body as { segments?: Array<{ id: string; sourceText: string }> } | null;
+    if (!input?.segments?.length) return { ok: false, status: 400, message: "Dữ liệu dịch không hợp lệ" };
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST", signal,
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile", temperature: 0.2, response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "Dịch tự nhiên sang tiếng Việt để đọc lồng tiếng. Giữ nguyên id, tên riêng, thuật ngữ và số liệu; viết ngắn gọn; không giải thích. Trả JSON dạng {\"segments\":[{\"id\":\"...\",\"translatedText\":\"...\"}]}" },
+          { role: "user", content: JSON.stringify({ segments: input.segments }) },
+        ],
+      }),
+    });
+    if (!response.ok) return groqError(response);
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const parsed = JSON.parse(payload.choices?.[0]?.message?.content ?? "{}") as { segments?: Array<{ id: string; translatedText: string }> };
+    if (!Array.isArray(parsed.segments)) return { ok: false, status: 502, message: "Kết quả dịch Groq không hợp lệ" };
+    return { ok: true, status: 200, data: { segments: parsed.segments } };
+  }
+  if (path === "/api/transcribe") {
+    const input = body as { audioBase64?: string; mimeType?: string } | null;
+    if (!input?.audioBase64 || !input.mimeType) return { ok: false, status: 400, message: "Dữ liệu audio không hợp lệ" };
+    const form = new FormData();
+    const audioBytes = base64ToBytes(input.audioBase64);
+    const audioBuffer = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength) as ArrayBuffer;
+    form.append("file", new Blob([audioBuffer], { type: input.mimeType }), "chunk.webm");
+    form.append("model", "whisper-large-v3-turbo");
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "segment");
+    form.append("temperature", "0");
+    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST", signal, headers: { authorization: `Bearer ${apiKey}` }, body: form,
+    });
+    if (!response.ok) return groqError(response);
+    const payload = await response.json() as { text?: string; language?: string; segments?: Array<{ start?: number; end?: number; text?: string }> };
+    const segments = (payload.segments ?? []).flatMap((segment, index) => {
+      const sourceText = segment.text?.replace(/\s+/g, " ").trim();
+      if (!sourceText) return [];
+      return [{ id: `whisper-${index}`, startMs: Math.max(0, Math.round((segment.start ?? 0) * 1000)), endMs: Math.max(500, Math.round((segment.end ?? 0) * 1000)), sourceText }];
+    });
+    if (!segments.length && payload.text?.trim()) segments.push({ id: "whisper-0", startMs: 0, endMs: 5_000, sourceText: payload.text.trim() });
+    return { ok: true, status: 200, data: { segments, source: "Groq Whisper (API key riêng)", language: payload.language ?? "" } };
+  }
+  return { ok: false, status: 400, message: "Endpoint Groq không được hỗ trợ" };
+}
+
 interface BackgroundSegment { id: string; startMs: number; endMs: number; sourceText: string }
 
 function mergeTranscriptSegments(segments: BackgroundSegment[]): BackgroundSegment[] {
@@ -143,14 +214,28 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const key = requestKey(sender, request.requestId);
   const controller = new AbortController();
   requests.set(key, controller);
-  const operation = request.path === "/api/subtitles/youtube"
-    ? loadYouTubeSubtitles(request.body, controller.signal).then((data) => ({ ok: true, status: 200, data }))
-    : fetch(`${API_BASE_URL}${request.path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(request.body),
-    signal: controller.signal,
-  }).then(async (response) => {
+  const operation = (async () => {
+    if (request.path === "/api/subtitles/youtube") {
+      return { ok: true, status: 200, data: await loadYouTubeSubtitles(request.body, controller.signal) };
+    }
+    const stored = await chrome.storage.local.get("groqApiKey");
+    const customKey = typeof stored.groqApiKey === "string" ? stored.groqApiKey.trim() : "";
+    if (customKey && (request.path === "/api/translate" || request.path === "/api/transcribe")) {
+      const session = await chrome.storage.session.get("groqCooldownUntil");
+      const cooldownUntil = Number(session.groqCooldownUntil ?? 0);
+      if (cooldownUntil <= Date.now()) {
+        const directResult = await requestGroqDirect(request.path, request.body, customKey, controller.signal);
+        if (directResult.ok) return directResult;
+        const quotaFailure = directResult.status === 429
+          || (directResult.status === 400 && /quota|rate.?limit|limit reached|blocked_api_access/i.test(directResult.message ?? ""));
+        if (!quotaFailure) return directResult;
+        await chrome.storage.session.set({ groqCooldownUntil: Date.now() + (directResult.retryAfterMs ?? 5 * 60_000) });
+        // Không trả lỗi: retry chính request hiện tại bằng key mặc định qua backend.
+      }
+    }
+    const response = await fetch(`${API_BASE_URL}${request.path}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request.body), signal: controller.signal,
+    });
     if (!response.ok) {
       const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
       return { ok: false, status: response.status, message: payload?.error?.message ?? `Backend trả lỗi ${response.status}` };
@@ -159,7 +244,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
       return { ok: true, status: response.status, audioBase64: bufferToBase64(await response.arrayBuffer()), mimeType: response.headers.get("content-type") ?? "audio/mpeg" };
     }
     return { ok: true, status: response.status, data: await response.json() };
-  });
+  })();
   void operation.catch((error: unknown) => ({ ok: false, status: 0, message: error instanceof Error ? error.message : "Không thể kết nối dịch vụ" }))
     .then(respond)
     .finally(() => requests.delete(key));

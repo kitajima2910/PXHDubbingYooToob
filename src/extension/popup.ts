@@ -13,6 +13,11 @@ app.innerHTML = `
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
   <section class="config-card"><div><span>Độ trễ tự động</span><strong>6 giây</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="api-card">
+    <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
+    <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
+    <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
+  </section>
   <footer>Đóng popup và nhấn Play nổi bên trái video.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
@@ -28,6 +33,48 @@ function render(state?: ExtensionState): void {
   query("#count").textContent = `${value.processedSegments} đoạn`;
   query("#statusDot").className = `status-dot ${value.status}`;
 }
+
+const keyInput = query<HTMLInputElement>("#groqKey");
+const defaultKeyButton = query<HTMLButtonElement>("#useDefault");
+
+async function renderKeyState(): Promise<void> {
+  const [stored, session] = await Promise.all([
+    chrome.storage.local.get("groqApiKey"), chrome.storage.session.get("groqCooldownUntil"),
+  ]);
+  const hasCustomKey = typeof stored.groqApiKey === "string" && stored.groqApiKey.length > 0;
+  const coolingDown = hasCustomKey && Number(session.groqCooldownUntil ?? 0) > Date.now();
+  query("#keyState").textContent = coolingDown
+    ? "Key riêng hết quota — đang tự dùng mặc định"
+    : hasCustomKey ? "Đang dùng key riêng (có tự chuyển)" : "Đang dùng key mặc định";
+  defaultKeyButton.disabled = !hasCustomKey;
+}
+
+query<HTMLFormElement>("#keyForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const apiKey = keyInput.value.trim();
+  if (!/^gsk_[A-Za-z0-9_-]{20,}$/.test(apiKey)) {
+    query("#keyState").textContent = "API key không hợp lệ";
+    keyInput.focus();
+    return;
+  }
+  void Promise.all([
+    chrome.storage.local.set({ groqApiKey: apiKey }), chrome.storage.session.remove("groqCooldownUntil"),
+  ]).then(() => {
+    keyInput.value = "";
+    void renderKeyState();
+  });
+});
+
+defaultKeyButton.addEventListener("click", () => {
+  void Promise.all([
+    chrome.storage.local.remove("groqApiKey"), chrome.storage.session.remove("groqCooldownUntil"),
+  ]).then(() => {
+    keyInput.value = "";
+    void renderKeyState();
+  });
+});
+
+void renderKeyState();
 
 void activeTab().then(async (tab) => {
   if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }

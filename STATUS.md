@@ -1,6 +1,10 @@
 # Trạng thái PXHDubbingYooToob
 
 > UI 2026-08-06: chuyển Start/Stop sang nút Play nổi 44 px ở giữa cạnh trái YouTube (Shadow DOM, trạng thái play/stop/loading/error); popup `PXH Dubbing YooToob` chỉ hiển thị trạng thái/thông tin, không còn nút hay settings. Dùng cấu hình cố định độ trễ Whisper 6 giây và âm gốc 8%. Thêm `activeTab` cho quyền capture sau khi người dùng gọi extension.
+> BYOK Groq: popup cho nhập/lưu/xóa API key riêng trong `chrome.storage.local` (password field, không hiển thị lại). Service worker ưu tiên key riêng và gọi thẳng `api.groq.com` cho translate/Whisper; key không qua content script hay Vercel. Khi không có key riêng, giữ nguyên backend/key mặc định. Manifest chỉ bổ sung host permission chính thức của Groq.
+> Verify BYOK: `npm run check`, 8/8 test và production build đạt; bundle popup/background mới đã sinh thành công. Key riêng chỉ được đọc trong popup/service worker, không được gửi sang content script hoặc ghi log.
+> Auto failover Groq: nếu key riêng trả 429 hoặc lỗi quota/rate-limit, service worker retry ngay request hiện tại qua backend/key mặc định. `Retry-After` được lưu trong `chrome.storage.session` (mặc định 5 phút, giới hạn 30 giây–24 giờ) để các request sau tạm bỏ qua key riêng; lưu key mới sẽ xóa cooldown. Popup hiển thị key đang cooldown.
+> Verify auto failover: `npm run check`, 8/8 test và production build đạt.
 > Realtime 2026-08-06: khi nhấn Play, video đang chạy sẽ pause trong lúc chuẩn bị và tự play khi audio đầu tiên sẵn sàng. Transcript DOM được ưu tiên, dedupe theo timestamp+nội dung và panel vẫn nằm trong DOM nhưng bị thu về width/height 0. Whisper dùng hàng đợi latest-wins, bỏ chunk cũ khi backend chậm và reset chunk thu thử trước khi fallback để tránh lặp/ứ tải; spinner chỉ hiện đến audio đầu tiên.
 > Verify realtime mới: `npm run check`, 8/8 test và `npm run build` đều đạt; production bundle có content/background/offscreen/page-bridge mới.
 > Quyền tabCapture: mở popup tự chuẩn bị phiên capture ở gain 100% trong ngữ cảnh Chrome action; nút Play nổi tái sử dụng phiên này, tránh lỗi `Extension has not been invoked for the current page` mà không pause/làm nhỏ âm thanh khi chỉ mở popup.
