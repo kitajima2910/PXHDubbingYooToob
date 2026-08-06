@@ -62,7 +62,16 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
     throw new Error("Khoảng phụ đề yêu cầu không hợp lệ");
   }
   const fetchWithSignal: typeof globalThis.fetch = (url, init) => globalThis.fetch(url, { ...init, signal });
-  const transcript = await YoutubeTranscript.fetchTranscript(input.videoId, { fetch: fetchWithSignal });
+  let transcript;
+  try {
+    transcript = await YoutubeTranscript.fetchTranscript(input.videoId, { fetch: fetchWithSignal });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/transcript is disabled|transcript disabled|subtitles are disabled/i.test(message)) {
+      throw new Error("Video này đã tắt phụ đề; cần nhận dạng âm thanh bằng Whisper");
+    }
+    throw error;
+  }
   const durations = transcript.map((item) => item.duration).filter((duration) => Number.isFinite(duration) && duration > 0).sort((left, right) => left - right);
   const medianDuration = durations[Math.floor(durations.length / 2)] ?? 0;
   const detectedScale = medianDuration > 0 && medianDuration < 100 ? 1_000 : 1;

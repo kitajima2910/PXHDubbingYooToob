@@ -12,6 +12,7 @@
 > Loại timestamp dạng `m:ss`/`h:mm:ss` ở đầu text của renderer mới trước khi dịch và TTS, tránh giọng đọc đọc luôn số giây trong Bản chép lời.
 > Hỗ trợ thêm timestamp dùng dấu chấm hoặc dấu hai chấm Unicode (`0.51`, `0：51`) trong cả parser thời gian và bước loại timestamp khỏi nội dung.
 > Lọc mọi token timestamp nằm ở bất kỳ vị trí nào trong transcript (không chỉ đầu câu), lọc lại lần hai trước dịch/TTS, và tự đóng/ẩn panel Bản chép lời ngay sau khi đã đọc dữ liệu DOM.
+> Video `36CVX2eefuI` được YouTube xác nhận transcript bị tắt; chuẩn hóa lỗi fallback thành thông báo tiếng Việt nêu rõ cần Whisper. Đây không phải lỗi Vercel và không thể lấy bằng các API caption hiện tại.
 
 Cập nhật: 2026-08-06
 
