@@ -165,8 +165,17 @@ function transcriptSegmentsFromDom(): TranscriptSegment[] {
       ?? attributedStrings.find((text) => /^\d{1,2}(?:[:.：]\d{2}){1,2}$/.test(text))
       ?? rawText.match(/^\d{1,2}(?:[:.：]\d{2}){1,2}/)?.[0]
       ?? "";
-    const directText = row.querySelector(".segment-text, [class*='segment-text']")?.textContent;
-    const candidateText = directText ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText;
+    const clone = row.cloneNode(true) as Element;
+    clone.querySelectorAll(".segment-timestamp, [class*='timestamp'], [class*='time-button']").forEach((element) => element.remove());
+    if (timeText) {
+      const normalizedTime = timeText.replace(/\s+/g, " ").trim();
+      [...clone.querySelectorAll("button, .yt-core-attributed-string, span")]
+        .filter((element) => (element.textContent ?? "").replace(/\s+/g, " ").trim() === normalizedTime)
+        .forEach((element) => element.remove());
+    }
+    const directText = row.querySelector(".segment-text, yt-formatted-string.segment-text, [class~='segment-text']")?.textContent;
+    const textWithoutTimeNodes = (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+    const candidateText = directText ?? textWithoutTimeNodes ?? attributedStrings.filter((text) => text !== timeText).at(-1) ?? rawText;
     const sourceText = stripTranscriptTimestamps(candidateText, timeText);
     const startMs = timestampMs(timeText);
     if (startMs === undefined || !sourceText) return [];

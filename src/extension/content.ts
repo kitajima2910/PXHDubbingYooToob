@@ -1,5 +1,5 @@
 import type { ExtensionState, SubtitleSegment } from "../shared/types";
-import { batchSegments, selectUpcomingSegments } from "../shared/segments";
+import { batchSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../shared/segments";
 import { createAssemblyToken, createSpeech, loadBackendCaptions, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
@@ -100,8 +100,11 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
 
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>, onFirstAudio: () => void): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
-  const candidates = selectUpcomingSegments(segments, fromMs, 45_000, queued);
-  for (const item of candidates) queued.add(item.id);
+  const upcoming = selectUpcomingSegments(segments, fromMs, 45_000, queued);
+  for (const item of upcoming) queued.add(item.id);
+  const candidates = upcoming
+    .map((segment) => ({ ...segment, sourceText: stripTranscriptTimestamps(segment.sourceText) }))
+    .filter((segment) => segment.sourceText.length > 0);
   for (const batch of batchSegments(candidates, 8)) {
     if (signal.aborted) return 0;
     update({ status: "translating", message: "Đang dịch" });

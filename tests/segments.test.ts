@@ -41,5 +41,6 @@ describe("xử lý đoạn phụ đề", () => {
     expect(stripTranscriptTimestamps("0:42 super useful", "0:42")).toBe("super useful");
     expect(stripTranscriptTimestamps("0.51 this will be useful")).toBe("this will be useful");
     expect(stripTranscriptTimestamps("Text 1：02 tiếp theo")).toBe("Text tiếp theo");
+    expect(stripTranscriptTimestamps("0:42", "0:42")).toBe("");
   });
 });
