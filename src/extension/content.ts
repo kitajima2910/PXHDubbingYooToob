@@ -18,6 +18,8 @@ let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
+let trainingRecorder: MediaRecorder | undefined;
+let trainingStream: MediaStream | undefined;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 
@@ -60,6 +62,46 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
     const timer = window.setTimeout(resolve, ms);
     signal.addEventListener("abort", () => { window.clearTimeout(timer); resolve(); }, { once: true });
   });
+}
+
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
+}
+
+function stopTrainingRecorder(): void {
+  if (trainingRecorder?.state !== "inactive") trainingRecorder?.stop();
+  trainingRecorder = undefined;
+  trainingStream?.getTracks().forEach((track) => track.stop());
+  trainingStream = undefined;
+}
+
+function startTrainingRecorder(video: HTMLVideoElement): void {
+  stopTrainingRecorder();
+  const captureStream = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream;
+  if (typeof captureStream !== "function") throw new Error("Trình duyệt không hỗ trợ thu audio trực tiếp từ video");
+  const captured = captureStream.call(video);
+  const audioTracks = captured.getAudioTracks();
+  if (!audioTracks.length) {
+    captured.getTracks().forEach((track) => track.stop());
+    throw new Error("Video chưa cung cấp audio để Whisper nhận dạng");
+  }
+  trainingStream = new MediaStream(audioTracks);
+  const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+  const recorder = new MediaRecorder(trainingStream, { mimeType, audioBitsPerSecond: 48_000 });
+  trainingRecorder = recorder;
+  let chunkStartedAt = Date.now();
+  recorder.addEventListener("dataavailable", (event) => {
+    if (!event.data.size) return;
+    const durationMs = Math.max(500, Date.now() - chunkStartedAt);
+    chunkStartedAt = Date.now();
+    void event.data.arrayBuffer().then((buffer) => chrome.runtime.sendMessage({
+      action: "training-capture-chunk", audioBase64: bufferToBase64(buffer), mimeType, durationMs,
+    }));
+  });
+  recorder.start(5_000);
 }
 
 async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal): Promise<void> {
@@ -325,12 +367,18 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   if (request.action === "training-playback-start") {
     const video = document.querySelector<HTMLVideoElement>("video");
     if (!video) { respond({ ok: false, message: "Không tìm thấy trình phát YouTube" }); return; }
-    video.loop = false;
-    video.playbackRate = 1;
-    video.currentTime = Math.max(0, (request.startMs ?? 0) / 1000);
+    try {
+      video.loop = false;
+      video.playbackRate = 1;
+      video.currentTime = Math.max(0, (request.startMs ?? 0) / 1000);
+      startTrainingRecorder(video);
+    } catch (error) {
+      respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu audio video" });
+      return;
+    }
     void video.play().then(
       () => respond({ ok: true, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : 0 }),
-      (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "YouTube không cho tự phát video" }),
+      (error: unknown) => { stopTrainingRecorder(); respond({ ok: false, message: error instanceof Error ? error.message : "YouTube không cho tự phát video" }); },
     );
     return true;
   }
@@ -341,6 +389,7 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   }
   if (request.action === "training-playback-stop") {
     document.querySelector<HTMLVideoElement>("video")?.pause();
+    stopTrainingRecorder();
     respond({ ok: true });
     return;
   }

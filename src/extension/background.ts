@@ -136,9 +136,6 @@ function waitForTrainingChunk(capture: NonNullable<typeof trainingAudioCapture>,
 async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
   const tabId = playlistTrainingTabId;
   if (tabId === undefined) throw new Error("Worker train không còn hoạt động");
-  await ensureOffscreenDocument();
-  const captureStatus = await chrome.runtime.sendMessage({ action: "capture-offscreen-status" }) as { active?: boolean; tabId?: number };
-  if (captureStatus?.active && captureStatus.tabId !== tabId) throw new Error("Đang dùng microphone audio cho một phiên dubbing khác; hãy retry video sau");
   const progressStorage = await chrome.storage.local.get("playlistTrainingWhisperProgress");
   const progress = (progressStorage.playlistTrainingWhisperProgress ?? {}) as Record<string, number>;
   let capturedUntilMs = Math.max(0, Number(progress[videoId] ?? 0));
@@ -150,7 +147,6 @@ async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): 
   const allSegments: BackgroundSegment[] = [...(cached.segments ?? [])];
   let completed = false;
   try {
-    await ensureTabCapture(tabId, 0);
     const started = await chrome.tabs.sendMessage(tabId, { action: "training-playback-start", startMs: capturedUntilMs }) as { ok?: boolean; message?: string };
     if (!started?.ok) throw new Error(started?.message ?? "Không thể phát video để nhận dạng audio");
     while (!signal.aborted) {
@@ -177,7 +173,6 @@ async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): 
   } finally {
     trainingAudioCapture = undefined;
     await chrome.tabs.sendMessage(tabId, { action: "training-playback-stop" }).catch(() => undefined);
-    await stopTabCapture();
   }
   if (completed) {
     delete progress[videoId];
@@ -510,13 +505,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "tts-stop") { chrome.tts.stop(); respond({ ok: true }); return; }
   if (request?.action === "tts-pause") { chrome.tts.pause(); respond({ ok: true }); return; }
   if (request?.action === "tts-resume") { chrome.tts.resume(); respond({ ok: true }); return; }
-  if (request?.action === "capture-chunk" && request.tabId !== undefined && request.audioBase64 && request.mimeType && request.durationMs) {
-    if (trainingAudioCapture?.tabId === request.tabId) {
+  if ((request?.action === "capture-chunk" || request?.action === "training-capture-chunk") && request.audioBase64 && request.mimeType && request.durationMs) {
+    const captureTabId = request.tabId ?? sender.tab?.id;
+    if (captureTabId !== undefined && trainingAudioCapture?.tabId === captureTabId) {
       trainingAudioCapture.chunks.push({ audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs });
       trainingAudioCapture.notify?.();
       respond({ ok: true }); return;
     }
-    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-chunk", audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs }).catch(() => undefined);
+    if (request.action === "capture-chunk" && request.tabId !== undefined) {
+      void chrome.tabs.sendMessage(request.tabId, { action: "whisper-chunk", audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs }).catch(() => undefined);
+    }
     respond({ ok: true }); return;
   }
   if (request?.action === "api-cancel" && request.requestId) {
