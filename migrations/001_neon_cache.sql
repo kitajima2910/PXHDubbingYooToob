@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS pxh_transcript_cache (
+CREATE SCHEMA IF NOT EXISTS pxh_dubbing;
+
+CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_cache (
   video_id varchar(11) NOT NULL,
   source_language varchar(16) NOT NULL,
   segment_key char(64) NOT NULL,
@@ -13,9 +15,9 @@ CREATE TABLE IF NOT EXISTS pxh_transcript_cache (
 );
 
 CREATE INDEX IF NOT EXISTS pxh_transcript_cache_timeline
-ON pxh_transcript_cache (video_id, source_language, start_ms);
+ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms);
 
-CREATE TABLE IF NOT EXISTS pxh_translation_cache (
+CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_translation_cache (
   video_id varchar(11) NOT NULL,
   source_language varchar(16) NOT NULL,
   target_language varchar(16) NOT NULL,

@@ -32,8 +32,9 @@ export function contentHash(text: string): string {
 
 async function ensureSchema(sql: NeonQueryFunction<false, false>): Promise<void> {
   schemaReady ??= (async () => {
+    await sql.query("CREATE SCHEMA IF NOT EXISTS pxh_dubbing");
     await sql.query(`
-      CREATE TABLE IF NOT EXISTS pxh_transcript_cache (
+      CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_cache (
         video_id varchar(11) NOT NULL,
         source_language varchar(16) NOT NULL,
         segment_key char(64) NOT NULL,
@@ -49,10 +50,10 @@ async function ensureSchema(sql: NeonQueryFunction<false, false>): Promise<void>
     `);
     await sql.query(`
       CREATE INDEX IF NOT EXISTS pxh_transcript_cache_timeline
-      ON pxh_transcript_cache (video_id, source_language, start_ms)
+      ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms)
     `);
     await sql.query(`
-      CREATE TABLE IF NOT EXISTS pxh_translation_cache (
+      CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_translation_cache (
         video_id varchar(11) NOT NULL,
         source_language varchar(16) NOT NULL,
         target_language varchar(16) NOT NULL,
@@ -77,7 +78,7 @@ export async function readTranscript(
   await ensureSchema(sql);
   const rows = await sql.query(`
     SELECT segment_id, start_ms, end_ms, source_text, source, is_complete
-    FROM pxh_transcript_cache
+    FROM pxh_dubbing.pxh_transcript_cache
     WHERE video_id = $1 AND source_language = $2
       AND ($3::bigint IS NULL OR end_ms >= $3)
       AND ($4::bigint IS NULL OR start_ms <= $4)
@@ -108,7 +109,7 @@ export async function writeTranscript(
   if (!sql || !segments.length) return;
   await ensureSchema(sql);
   if (complete) {
-    await sql.query("DELETE FROM pxh_transcript_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
+    await sql.query("DELETE FROM pxh_dubbing.pxh_transcript_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
   }
   const payload = segments.map((segment) => ({
     segmentKey: contentHash(`${segment.startMs}:${segment.sourceText}`),
@@ -118,7 +119,7 @@ export async function writeTranscript(
     sourceText: segment.sourceText,
   }));
   await sql.query(`
-    INSERT INTO pxh_transcript_cache (
+    INSERT INTO pxh_dubbing.pxh_transcript_cache AS cache (
       video_id, source_language, segment_key, segment_id, start_ms, end_ms, source_text, source, is_complete
     )
     SELECT $1, $2, item.segment_key, item.segment_id, item.start_ms, item.end_ms, item.source_text, $3, $4
@@ -130,7 +131,7 @@ export async function writeTranscript(
       end_ms = EXCLUDED.end_ms,
       source_text = EXCLUDED.source_text,
       source = EXCLUDED.source,
-      is_complete = pxh_transcript_cache.is_complete OR EXCLUDED.is_complete,
+      is_complete = cache.is_complete OR EXCLUDED.is_complete,
       updated_at = now()
   `, [context.videoId, context.sourceLanguage, source, complete, JSON.stringify(payload.map((item) => ({
     segment_key: item.segmentKey,
@@ -151,7 +152,7 @@ export async function readTranslations(
   const requested = segments.map((segment) => ({ ...segment, hash: contentHash(segment.sourceText) }));
   const rows = await sql.query(`
     SELECT source_hash, translated_text
-    FROM pxh_translation_cache
+    FROM pxh_dubbing.pxh_translation_cache
     WHERE video_id = $1 AND source_language = $2 AND target_language = $3
       AND source_hash = ANY($4::text[])
   `, [context.videoId, context.sourceLanguage, context.targetLanguage, requested.map((item) => item.hash)]) as Array<{
@@ -177,7 +178,7 @@ export async function writeTranslations(
     translated_text: segment.translatedText,
   }));
   await sql.query(`
-    INSERT INTO pxh_translation_cache (
+    INSERT INTO pxh_dubbing.pxh_translation_cache (
       video_id, source_language, target_language, source_hash, source_text, translated_text
     )
     SELECT $1, $2, $3, item.source_hash, item.source_text, item.translated_text
