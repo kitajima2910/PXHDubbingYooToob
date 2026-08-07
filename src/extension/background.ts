@@ -98,25 +98,41 @@ async function playlistVideoIds(value: string): Promise<string[]> {
 }
 
 async function waitForTrainingContent(tabId: number, videoId: string, signal: AbortSignal): Promise<void> {
-  let lastError: unknown;
+  let lastMessageError: unknown;
+  let injectionError: unknown;
   let injected = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
     try {
       const ready = await chrome.tabs.sendMessage(tabId, { action: "training-ready" }) as { ok?: boolean; videoId?: string };
       if (ready?.ok && ready.videoId === videoId) return;
-    } catch (error) { lastError = error; }
+    } catch (error) { lastMessageError = error; }
     if (!injected && attempt >= 8) {
       injected = true;
       try {
         await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
         await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"], world: "ISOLATED" });
-      } catch (error) { lastError = error; }
+      } catch (error) { injectionError = error; }
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
-  throw new Error(`Content script trainer chưa sẵn sàng sau 15 giây${detail}`);
+  const messageDetail = lastMessageError instanceof Error ? lastMessageError.message : "không có listener";
+  const injectionDetail = injectionError instanceof Error ? `; inject: ${injectionError.message}` : "";
+  throw new Error(`Content script trainer chưa sẵn sàng sau 15 giây: ${messageDetail}${injectionDetail}`);
+}
+
+async function waitForTrainingPage(tabId: number, videoId: string, signal: AbortSignal): Promise<void> {
+  let lastUrl = "";
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+    const current = await chrome.tabs.get(tabId);
+    lastUrl = current.url ?? current.pendingUrl ?? "";
+    let currentVideoId = "";
+    try { currentVideoId = new URL(lastUrl).searchParams.get("v") ?? ""; } catch { /* Initial about:blank. */ }
+    if (current.status === "complete" && currentVideoId === videoId) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`YouTube chưa tải đúng video ${videoId} sau 25 giây (URL hiện tại: ${lastUrl || "trống"})`);
 }
 
 async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
@@ -137,18 +153,7 @@ async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Pro
     await chrome.tabs.update(playlistTrainingTabId, { muted: true });
   }
   if (tab.id === undefined) throw new Error("Không xác định được tab train nền");
-  if (tab.status !== "complete") await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error("YouTube tải quá lâu")); }, 25_000);
-      const listener = (tabId: number, change: { status?: string }): void => {
-        if (tabId !== tab.id || change.status !== "complete") return;
-        clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve();
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); reject(new DOMException("Job train đã dừng", "AbortError"));
-      }, { once: true });
-  });
-  if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+  await waitForTrainingPage(tab.id, videoId, signal);
   await waitForTrainingContent(tab.id, videoId, signal);
   const response = await chrome.tabs.sendMessage(tab.id, { action: "training-transcript" }) as { segments?: BackgroundSegment[]; message?: string };
   if (!response?.segments?.length) throw new Error(response?.message ?? "Transcript rỗng");
