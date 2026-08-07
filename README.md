@@ -4,7 +4,7 @@ Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube
 
 ## Trạng thái
 
-Bản hiện tại ưu tiên transcript DOM → cache Neon → kho dịch global → Groq dịch cache miss → Chrome TTS theo timestamp. Transcript vẫn lưu theo video; bản dịch dùng chung giữa mọi video theo ngôn ngữ, hash câu và phiên bản dịch. Video không có transcript dùng Groq Whisper theo chunk 5 giây. Xem [STATUS.md](./STATUS.md).
+Bản hiện tại ưu tiên transcript DOM → cache Neon → Translation Memory exact/canonical/gold → Groq dịch cache miss → Chrome TTS theo timestamp. Transcript vẫn lưu theo video; bản dịch dùng chung giữa mọi video theo ngôn ngữ, hash câu và phiên bản dịch. Canonical key tái sử dụng an toàn khi chỉ khác kiểu chữ, Unicode, khoảng trắng hoặc dấu câu cuối; bản dịch `gold` không bị job train ghi đè. Video không có transcript dùng Groq Whisper theo chunk 5 giây. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
@@ -36,7 +36,7 @@ Yêu cầu Node.js 20 trở lên.
 4. Để cấp quyền tối thiểu khi phát hành, thay mẫu `https://*.vercel.app/*` trong `public/manifest.json` bằng đúng tên miền backend rồi build lại.
 5. Sau khi Chrome cấp ID extension, đặt `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại backend.
 
-Endpoint cache tự tạo bảng bằng schema tương đương `migrations/001_neon_cache.sql` và `migrations/002_global_translation_memory.sql`. Dùng `npm run migrate:global-translations` để chuyển bản dịch từ cache theo video cũ sang project global mà không xóa dữ liệu nguồn.
+Endpoint cache tự tạo bảng bằng schema tương đương `migrations/001_neon_cache.sql`, `migrations/002_global_translation_memory.sql` và `migrations/003_multilayer_translation_memory.sql`. Dùng `npm run migrate:global-translations` để chuyển bản dịch từ cache theo video cũ sang project global mà không xóa dữ liệu nguồn. Translation Memory lưu thêm `quality` (`machine`, `reviewed`, `gold`), `usage_count` và `last_used_at`; chỉ nâng một bản dịch thành `gold` sau khi đã kiểm duyệt nội dung.
 
 ## Kiểm tra
 
