@@ -323,7 +323,7 @@ function fail(message: string): ExtensionState { update({ enabled: false, status
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
   if (request.action === "training-transcript") {
-    void loadYouTubeCaptions().then(
+    void loadYouTubeCaptions(45_000).then(
       (captions) => respond({ segments: captions.segments }),
       (error: unknown) => respond({ message: error instanceof Error ? error.message : "Không thể lấy transcript" }),
     );

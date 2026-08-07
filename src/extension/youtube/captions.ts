@@ -4,10 +4,10 @@ import { mergeOverlappingSegments, stripTranscriptTimestamps } from "../../share
 interface CaptionTrack { baseUrl: string; languageCode: string; kind?: string }
 interface BridgePayload { text: string; format: "json3" | "xml" | "segments"; source: string }
 
-function loadFromPageWorld(): Promise<BridgePayload> {
+function loadFromPageWorld(timeoutMs = 12_000): Promise<BridgePayload> {
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, 12_000);
+    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Quá thời gian chờ phụ đề YouTube")); }, timeoutMs);
     const onMessage = (event: MessageEvent<unknown>): void => {
       if (event.source !== window) return;
       const message = event.data as { type?: string; requestId?: string; payload?: BridgePayload; error?: string } | null;
@@ -102,11 +102,11 @@ function decodeEntities(text: string): string {
   return element.value.replace(/\s+/g, " ").trim();
 }
 
-export async function loadYouTubeCaptions(): Promise<{ segments: SubtitleSegment[]; source: string }> {
+export async function loadYouTubeCaptions(bridgeTimeoutMs = 12_000): Promise<{ segments: SubtitleSegment[]; source: string }> {
   let data: Json3CaptionData;
   let source: string;
   try {
-    const payload = await loadFromPageWorld();
+    const payload = await loadFromPageWorld(bridgeTimeoutMs);
     if (payload.format === "segments") {
       const parsed = JSON.parse(payload.text) as { segments?: SubtitleSegment[] };
       const segments = (parsed.segments ?? [])
