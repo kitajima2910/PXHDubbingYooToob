@@ -99,12 +99,20 @@ async function playlistVideoIds(value: string): Promise<string[]> {
 
 async function waitForTrainingContent(tabId: number, videoId: string, signal: AbortSignal): Promise<void> {
   let lastError: unknown;
+  let injected = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
     try {
       const ready = await chrome.tabs.sendMessage(tabId, { action: "training-ready" }) as { ok?: boolean; videoId?: string };
       if (ready?.ok && ready.videoId === videoId) return;
     } catch (error) { lastError = error; }
+    if (!injected && attempt >= 8) {
+      injected = true;
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
+        await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"], world: "ISOLATED" });
+      } catch (error) { lastError = error; }
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
