@@ -1,5 +1,6 @@
 import type { ExtensionState } from "../shared/types";
 import "./popup.css";
+import "./training.css";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
@@ -22,7 +23,7 @@ app.innerHTML = `
   <section class="api-card training-card">
     <div class="api-heading"><div><span>PRE-TRAIN PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
     <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="https://youtube.com/playlist?list=..."><button id="trainPlaylist" type="submit">Train</button></form>
-    <button id="resetTraining" class="default-key" type="button">Dừng Train</button>
+    <button id="resetTraining" class="stop-training" type="button" hidden>Dừng Train</button>
   </section>
   <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
 
@@ -62,6 +63,7 @@ async function renderKeyState(): Promise<void> {
     ? "Key riêng hết quota — đang tự dùng mặc định"
     : hasCustomKey ? "Đang dùng key riêng (có tự chuyển)" : "Đang dùng key mặc định";
   defaultKeyButton.disabled = !hasCustomKey;
+  defaultKeyButton.textContent = hasCustomKey ? "Chuyển sang key mặc định" : "✓ Đang dùng API key mặc định";
 }
 
 query<HTMLFormElement>("#keyForm").addEventListener("submit", (event) => {
@@ -103,6 +105,7 @@ async function renderTrainingState(): Promise<void> {
   query("#trainingState").textContent = training?.message ?? "Chưa chạy";
   trainingButton.disabled = training?.running === true;
   resetTrainingButton.disabled = training?.running !== true;
+  resetTrainingButton.hidden = training?.running !== true;
 }
 query<HTMLFormElement>("#trainingForm").addEventListener("submit", (event) => {
   event.preventDefault();

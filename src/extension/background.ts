@@ -76,10 +76,12 @@ async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Pro
     tab = workerTab;
     playlistTrainingTabId = tab.id;
     playlistTrainingWindowId = workerWindow.id;
+    await chrome.tabs.update(tab.id, { muted: true });
   } else {
     const updatedTab = await chrome.tabs.update(playlistTrainingTabId, { url: trainingUrl, active: true });
     if (!updatedTab) throw new Error("Không thể chuyển worker sang video kế tiếp");
     tab = updatedTab;
+    await chrome.tabs.update(playlistTrainingTabId, { muted: true });
   }
   if (tab.id === undefined) throw new Error("Không xác định được tab train nền");
   if (tab.status !== "complete") await new Promise<void>((resolve, reject) => {

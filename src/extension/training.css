@@ -1,0 +1,16 @@
+.stop-training {
+  width: 100%;
+  height: 32px;
+  margin-top: 8px;
+  border: 1px solid #ff4056;
+  background: linear-gradient(135deg, #35151c, #241116);
+  color: #ff8795;
+  box-shadow: inset 0 0 0 1px #ff405612;
+}
+
+.stop-training:hover:not(:disabled) {
+  background: linear-gradient(135deg, #521923, #321219);
+  color: #fff;
+}
+
+.stop-training[hidden] { display: none; }
