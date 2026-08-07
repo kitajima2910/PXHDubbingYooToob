@@ -8,6 +8,7 @@
     "test": "vitest run",
     "dev": "vite",
     "dev:api": "tsx scripts/local-api.ts",
+    "migrate:global-translations": "tsx scripts/migrate-global-translations.ts",
     "check": "tsc --noEmit && tsc -p tsconfig.api.json --noEmit"
   },
   "dependencies": {

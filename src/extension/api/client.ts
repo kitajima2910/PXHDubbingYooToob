@@ -3,7 +3,7 @@ import { mapTranslations } from "../../shared/segments";
 
 interface ApiResponse<T> { ok: boolean; status: number; data?: T; audioBase64?: string; mimeType?: string; message?: string }
 export interface CacheContext { videoId: string; sourceLanguage: string }
-let cacheAvailable: boolean | undefined;
+const cacheAvailability: Partial<Record<"transcript" | "translations", boolean>> = {};
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const requestId = crypto.randomUUID();
@@ -17,11 +17,13 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
 }
 
 async function cachePost<T>(body: unknown, signal?: AbortSignal): Promise<T | undefined> {
-  if (cacheAvailable === false) return undefined;
+  const action = (body as { action?: string }).action ?? "";
+  const cacheType = action.startsWith("transcript:") ? "transcript" : "translations";
+  if (cacheAvailability[cacheType] === false) return undefined;
   try {
     const result = await post<T & { enabled?: boolean }>("/api/cache", body, signal);
-    cacheAvailable = result.enabled !== false;
-    return cacheAvailable ? result : undefined;
+    cacheAvailability[cacheType] = result.enabled !== false;
+    return cacheAvailability[cacheType] ? result : undefined;
   } catch (error) {
     if (!signal?.aborted) console.warn("PXHDubbingYooToob: bỏ qua cache Neon", error);
     return undefined;
@@ -31,7 +33,7 @@ async function cachePost<T>(body: unknown, signal?: AbortSignal): Promise<T | un
 export async function translateSegments(segments: SubtitleSegment[], signal?: AbortSignal, cache?: CacheContext): Promise<SubtitleSegment[]> {
   const requested = segments.map(({ id, sourceText }) => ({ id, sourceText }));
   const cached = cache ? await cachePost<{ segments?: Array<{ id: string; translatedText: string }> }>({
-    action: "translations:get", ...cache, targetLanguage: "vi", segments: requested,
+    action: "translations:get", sourceLanguage: cache.sourceLanguage, targetLanguage: "vi", segments: requested,
   }, signal) : undefined;
   const cachedById = new Map((cached?.segments ?? []).map((item) => [item.id, item.translatedText]));
   const missing = segments.filter((segment) => !cachedById.has(segment.id));
@@ -42,7 +44,7 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
     }, signal);
     translatedMissing = mapTranslations(missing, result.segments);
     if (cache) void cachePost({
-      action: "translations:put", ...cache, targetLanguage: "vi",
+      action: "translations:put", sourceLanguage: cache.sourceLanguage, targetLanguage: "vi",
       segments: translatedMissing.map((segment) => ({ sourceText: segment.sourceText, translatedText: segment.translatedText ?? segment.sourceText })),
     }).catch(() => undefined);
   }

@@ -4,7 +4,7 @@ Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube
 
 ## Trạng thái
 
-Bản hiện tại ưu tiên transcript DOM → cache Neon → Groq dịch → Chrome TTS theo timestamp. Video không có transcript dùng Groq Whisper theo chunk 5 giây và lưu kết quả vào cache để tái sử dụng. Máy không có giọng Việt trong Chrome sẽ dùng Edge TTS `vi-VN-HoaiMyNeural`. Xem [STATUS.md](./STATUS.md).
+Bản hiện tại ưu tiên transcript DOM → cache Neon → kho dịch global → Groq dịch cache miss → Chrome TTS theo timestamp. Transcript vẫn lưu theo video; bản dịch dùng chung giữa mọi video theo ngôn ngữ, hash câu và phiên bản dịch. Video không có transcript dùng Groq Whisper theo chunk 5 giây. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
@@ -22,7 +22,7 @@ API key chỉ tồn tại trong biến môi trường backend. Extension không 
 Yêu cầu Node.js 20 trở lên.
 
 1. Chạy `npm install`.
-2. Sao chép `.env.example` thành `.env.local`, điền `GROQ_API_KEY`; điền thêm `DATABASE_URL` nếu dùng cache Neon và giữ file này ngoài Git.
+2. Sao chép `.env.example` thành `.env.local`, điền `GROQ_API_KEY`, `DATABASE_URL` cho transcript và `DUBBING_DATABASE_URL` cho kho dịch global; giữ file này ngoài Git.
 3. Chạy `npm run dev:api` để chạy API local tại `http://localhost:3000`; lệnh này không yêu cầu đăng nhập Vercel.
 4. Ở terminal khác, chạy `npm run dev` khi phát triển hoặc `npm run build` để tạo extension trong `dist`.
 5. Mở `chrome://extensions`, bật **Chế độ dành cho nhà phát triển**, chọn **Tải tiện ích đã giải nén** và chọn thư mục `dist`.
@@ -31,12 +31,12 @@ Yêu cầu Node.js 20 trở lên.
 ## Triển khai Vercel
 
 1. Import repository vào Vercel.
-2. Thêm `GROQ_API_KEY`, `GROQ_TRANSLATION_MODEL`, `DATABASE_URL` và `EXTENSION_ORIGIN` trong Project Settings → Environment Variables.
+2. Thêm `GROQ_API_KEY`, `GROQ_TRANSLATION_MODEL`, `DATABASE_URL`, `DUBBING_DATABASE_URL`, `TRANSLATION_CACHE_VERSION` và `EXTENSION_ORIGIN` trong Project Settings → Environment Variables.
 3. Deploy, rồi build extension với `VITE_API_BASE_URL=https://ten-du-an.vercel.app`.
 4. Để cấp quyền tối thiểu khi phát hành, thay mẫu `https://*.vercel.app/*` trong `public/manifest.json` bằng đúng tên miền backend rồi build lại.
 5. Sau khi Chrome cấp ID extension, đặt `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại backend.
 
-Endpoint cache tự tạo bảng bằng schema tương đương `migrations/001_neon_cache.sql` ở lần truy cập đầu tiên. Có thể chạy file migration này thủ công trong Neon SQL Editor trước khi deploy nếu muốn quản lý schema riêng.
+Endpoint cache tự tạo bảng bằng schema tương đương `migrations/001_neon_cache.sql` và `migrations/002_global_translation_memory.sql`. Dùng `npm run migrate:global-translations` để chuyển bản dịch từ cache theo video cũ sang project global mà không xóa dữ liệu nguồn.
 
 ## Kiểm tra
 

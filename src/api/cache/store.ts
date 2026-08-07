@@ -7,31 +7,41 @@ export interface CacheContext {
   sourceLanguage: string;
 }
 
-export interface TranslationCacheContext extends CacheContext {
+export interface TranslationCacheContext {
+  sourceLanguage: string;
   targetLanguage: string;
 }
 
-let schemaReady: Promise<void> | undefined;
+let transcriptSchemaReady: Promise<void> | undefined;
+let translationSchemaReady: Promise<void> | undefined;
 
-function databaseUrl(): string | undefined {
+function transcriptDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL?.trim() || process.env.NEON_DATABASE_URL?.trim() || undefined;
 }
 
-function database(): NeonQueryFunction<false, false> | undefined {
-  const url = databaseUrl();
+function translationDatabaseUrl(): string | undefined {
+  return process.env.DUBBING_DATABASE_URL?.trim() || transcriptDatabaseUrl();
+}
+
+function database(url: string | undefined): NeonQueryFunction<false, false> | undefined {
   return url ? neon(url) : undefined;
 }
 
 export function cacheConfigured(): boolean {
-  return Boolean(databaseUrl());
+  return Boolean(transcriptDatabaseUrl() || translationDatabaseUrl());
 }
+
+export function transcriptCacheConfigured(): boolean { return Boolean(transcriptDatabaseUrl()); }
+export function translationCacheConfigured(): boolean { return Boolean(translationDatabaseUrl()); }
+
+function translationVersion(): string { return process.env.TRANSLATION_CACHE_VERSION?.trim() || "v1"; }
 
 export function contentHash(text: string): string {
   return createHash("sha256").update(text.replace(/\s+/g, " ").trim(), "utf8").digest("hex");
 }
 
-async function ensureSchema(sql: NeonQueryFunction<false, false>): Promise<void> {
-  schemaReady ??= (async () => {
+async function ensureTranscriptSchema(sql: NeonQueryFunction<false, false>): Promise<void> {
+  transcriptSchemaReady ??= (async () => {
     await sql.query("CREATE SCHEMA IF NOT EXISTS pxh_dubbing");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_cache (
@@ -52,20 +62,28 @@ async function ensureSchema(sql: NeonQueryFunction<false, false>): Promise<void>
       CREATE INDEX IF NOT EXISTS pxh_transcript_cache_timeline
       ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms)
     `);
+  })().catch((error) => { transcriptSchemaReady = undefined; throw error; });
+  await transcriptSchemaReady;
+}
+
+async function ensureTranslationSchema(sql: NeonQueryFunction<false, false>): Promise<void> {
+  translationSchemaReady ??= (async () => {
+    await sql.query("CREATE SCHEMA IF NOT EXISTS pxh_dubbing");
     await sql.query(`
-      CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_translation_cache (
-        video_id varchar(11) NOT NULL,
+      CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_global_translation_memory (
         source_language varchar(16) NOT NULL,
         target_language varchar(16) NOT NULL,
+        translation_version varchar(32) NOT NULL,
         source_hash char(64) NOT NULL,
         source_text text NOT NULL,
         translated_text text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (video_id, source_language, target_language, source_hash)
+        PRIMARY KEY (source_language, target_language, translation_version, source_hash)
       )
     `);
-  })().catch((error) => { schemaReady = undefined; throw error; });
-  await schemaReady;
+  })().catch((error) => { translationSchemaReady = undefined; throw error; });
+  await translationSchemaReady;
 }
 
 export async function readTranscript(
@@ -73,9 +91,9 @@ export async function readTranscript(
   fromMs?: number,
   toMs?: number,
 ): Promise<{ segments: SubtitleSegment[]; source?: string; complete: boolean }> {
-  const sql = database();
+  const sql = database(transcriptDatabaseUrl());
   if (!sql) return { segments: [], complete: false };
-  await ensureSchema(sql);
+  await ensureTranscriptSchema(sql);
   const rows = await sql.query(`
     SELECT segment_id, start_ms, end_ms, source_text, source, is_complete
     FROM pxh_dubbing.pxh_transcript_cache
@@ -105,9 +123,9 @@ export async function writeTranscript(
   segments: SubtitleSegment[],
   complete: boolean,
 ): Promise<void> {
-  const sql = database();
+  const sql = database(transcriptDatabaseUrl());
   if (!sql || !segments.length) return;
-  await ensureSchema(sql);
+  await ensureTranscriptSchema(sql);
   if (complete) {
     await sql.query("DELETE FROM pxh_dubbing.pxh_transcript_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
   }
@@ -146,16 +164,16 @@ export async function readTranslations(
   context: TranslationCacheContext,
   segments: Array<{ id: string; sourceText: string }>,
 ): Promise<Array<{ id: string; translatedText: string }>> {
-  const sql = database();
+  const sql = database(translationDatabaseUrl());
   if (!sql || !segments.length) return [];
-  await ensureSchema(sql);
+  await ensureTranslationSchema(sql);
   const requested = segments.map((segment) => ({ ...segment, hash: contentHash(segment.sourceText) }));
   const rows = await sql.query(`
     SELECT source_hash, translated_text
-    FROM pxh_dubbing.pxh_translation_cache
-    WHERE video_id = $1 AND source_language = $2 AND target_language = $3
+    FROM pxh_dubbing.pxh_global_translation_memory
+    WHERE source_language = $1 AND target_language = $2 AND translation_version = $3
       AND source_hash = ANY($4::text[])
-  `, [context.videoId, context.sourceLanguage, context.targetLanguage, requested.map((item) => item.hash)]) as Array<{
+  `, [context.sourceLanguage, context.targetLanguage, translationVersion(), requested.map((item) => item.hash)]) as Array<{
     source_hash: string; translated_text: string;
   }>;
   const byHash = new Map(rows.map((row) => [row.source_hash.trim(), row.translated_text]));
@@ -169,23 +187,23 @@ export async function writeTranslations(
   context: TranslationCacheContext,
   segments: Array<{ sourceText: string; translatedText: string }>,
 ): Promise<void> {
-  const sql = database();
+  const sql = database(translationDatabaseUrl());
   if (!sql || !segments.length) return;
-  await ensureSchema(sql);
+  await ensureTranslationSchema(sql);
   const payload = segments.map((segment) => ({
     source_hash: contentHash(segment.sourceText),
     source_text: segment.sourceText,
     translated_text: segment.translatedText,
   }));
   await sql.query(`
-    INSERT INTO pxh_dubbing.pxh_translation_cache (
-      video_id, source_language, target_language, source_hash, source_text, translated_text
+    INSERT INTO pxh_dubbing.pxh_global_translation_memory (
+      source_language, target_language, translation_version, source_hash, source_text, translated_text
     )
     SELECT $1, $2, $3, item.source_hash, item.source_text, item.translated_text
     FROM jsonb_to_recordset($4::jsonb) AS item(source_hash char(64), source_text text, translated_text text)
-    ON CONFLICT (video_id, source_language, target_language, source_hash) DO UPDATE SET
+    ON CONFLICT (source_language, target_language, translation_version, source_hash) DO UPDATE SET
       source_text = EXCLUDED.source_text,
       translated_text = EXCLUDED.translated_text,
       updated_at = now()
-  `, [context.videoId, context.sourceLanguage, context.targetLanguage, JSON.stringify(payload)]);
+  `, [context.sourceLanguage, context.targetLanguage, translationVersion(), JSON.stringify(payload)]);
 }
