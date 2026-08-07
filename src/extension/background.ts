@@ -7,6 +7,9 @@ const requests = new Map<string, AbortController>();
 interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number }
 let playlistTrainingJob: Promise<void> | undefined;
 let playlistTrainingCancelled = false;
+let playlistTrainingController: AbortController | undefined;
+let playlistTrainingTabId: number | undefined;
+let playlistTrainingWindowId: number | undefined;
 
 async function resetInterruptedTraining(): Promise<void> {
   const stored = (await chrome.storage.local.get("playlistTraining")).playlistTraining as { running?: boolean } | undefined;
@@ -17,27 +20,36 @@ async function resetInterruptedTraining(): Promise<void> {
 chrome.runtime.onInstalled.addListener(() => { void resetInterruptedTraining(); });
 chrome.runtime.onStartup.addListener(() => { void resetInterruptedTraining(); });
 
-async function postTrainingApi(path: "/api/cache" | "/api/translate", body: unknown): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
-    throw new Error(payload?.error?.message ?? `Backend trả lỗi ${response.status}`);
+async function postTrainingApi(path: "/api/cache" | "/api/translate", body: unknown, signal?: AbortSignal): Promise<any> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE_URL}${path}`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
+      });
+      if (response.ok) return response.json();
+      const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+      lastError = new Error(payload?.error?.message ?? `Backend trả lỗi ${response.status}`);
+      if (response.status < 500 && response.status !== 429) throw lastError;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Không thể kết nối backend");
+    }
+    if (signal?.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1_000 * 2 ** attempt));
   }
-  return response.json();
+  throw lastError ?? new Error("Backend không phản hồi");
 }
 
-async function translateTrainingBatch(body: unknown): Promise<{ segments: Array<{ id: string; translatedText: string }> }> {
+async function translateTrainingBatch(body: unknown, signal: AbortSignal): Promise<{ segments: Array<{ id: string; translatedText: string }> }> {
   const stored = await chrome.storage.local.get("groqApiKey");
   const customKey = typeof stored.groqApiKey === "string" ? stored.groqApiKey.trim() : "";
   if (customKey) {
-    const direct = await requestGroqDirect("/api/translate", body, customKey, new AbortController().signal);
+    const direct = await requestGroqDirect("/api/translate", body, customKey, signal);
     if (direct.ok) return direct.data as { segments: Array<{ id: string; translatedText: string }> };
     const quotaFailure = direct.status === 429 || /quota|rate.?limit|limit reached|blocked_api_access/i.test(direct.message ?? "");
     if (!quotaFailure) throw new Error(direct.message ?? "Groq không thể dịch batch playlist");
   }
-  return postTrainingApi("/api/translate", body);
+  return postTrainingApi("/api/translate", body, signal);
 }
 
 async function playlistVideoIds(value: string): Promise<string[]> {
@@ -54,24 +66,44 @@ async function playlistVideoIds(value: string): Promise<string[]> {
   return unique;
 }
 
-async function loadTrainingTranscript(videoId: string): Promise<BackgroundSegment[]> {
-  const tab = await chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${videoId}`, active: false });
-  if (tab.id === undefined) throw new Error("Không thể mở tab train nền");
-  try {
-    if (tab.status !== "complete") await new Promise<void>((resolve, reject) => {
+async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
+  const trainingUrl = `https://www.youtube.com/watch?v=${videoId}&autoplay=0`;
+  let tab: chrome.tabs.Tab;
+  if (playlistTrainingTabId === undefined) {
+    const workerWindow = await chrome.windows.create({ url: trainingUrl, focused: false, state: "minimized", type: "popup" });
+    const workerTab = workerWindow?.tabs?.[0];
+    if (!workerWindow || !workerTab || workerTab.id === undefined || workerWindow.id === undefined) throw new Error("Không thể mở worker train nền");
+    tab = workerTab;
+    playlistTrainingTabId = tab.id;
+    playlistTrainingWindowId = workerWindow.id;
+  } else {
+    const updatedTab = await chrome.tabs.update(playlistTrainingTabId, { url: trainingUrl, active: true });
+    if (!updatedTab) throw new Error("Không thể chuyển worker sang video kế tiếp");
+    tab = updatedTab;
+  }
+  if (tab.id === undefined) throw new Error("Không xác định được tab train nền");
+  if (tab.status !== "complete") await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error("YouTube tải quá lâu")); }, 25_000);
       const listener = (tabId: number, change: { status?: string }): void => {
         if (tabId !== tab.id || change.status !== "complete") return;
         clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve();
       };
       chrome.tabs.onUpdated.addListener(listener);
-    });
-    const response = await chrome.tabs.sendMessage(tab.id, { action: "training-transcript" }) as { segments?: BackgroundSegment[]; message?: string };
-    if (!response?.segments?.length) throw new Error(response?.message ?? "Transcript rỗng");
-    return response.segments;
-  } finally {
-    await chrome.tabs.remove(tab.id).catch(() => undefined);
-  }
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); reject(new DOMException("Job train đã dừng", "AbortError"));
+      }, { once: true });
+  });
+  if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+  const response = await chrome.tabs.sendMessage(tab.id, { action: "training-transcript" }) as { segments?: BackgroundSegment[]; message?: string };
+  if (!response?.segments?.length) throw new Error(response?.message ?? "Transcript rỗng");
+  return response.segments;
+}
+
+async function closeTrainingWindow(): Promise<void> {
+  const windowId = playlistTrainingWindowId;
+  playlistTrainingWindowId = undefined;
+  playlistTrainingTabId = undefined;
+  if (windowId !== undefined) await chrome.windows.remove(windowId).catch(() => undefined);
 }
 
 async function notifyTraining(title: string, message: string): Promise<void> {
@@ -80,35 +112,35 @@ async function notifyTraining(title: string, message: string): Promise<void> {
   });
 }
 
-async function trainPlaylist(value: string): Promise<PlaylistTrainingResult> {
+async function trainPlaylist(value: string, signal: AbortSignal): Promise<PlaylistTrainingResult> {
   const videoIds = await playlistVideoIds(value);
   const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0 };
   await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc playlist" } });
   for (const [videoIndex, videoId] of videoIds.entries()) {
     if (playlistTrainingCancelled) throw new Error("Job train đã được hủy");
     try {
-      const segments = (await loadTrainingTranscript(videoId)).slice(0, 2_000);
+      const segments = (await loadTrainingTranscript(videoId, signal)).slice(0, 2_000);
       if (!segments.length) throw new Error("Transcript rỗng");
       await postTrainingApi("/api/cache", {
         action: "transcript:put", videoId, sourceLanguage: "auto", source: "Playlist trainer", complete: true, segments,
-      });
+      }, signal);
       for (let index = 0; index < segments.length; index += 20) {
         const batch = segments.slice(index, index + 20);
         const cached = await postTrainingApi("/api/cache", {
           action: "translations:get", sourceLanguage: "auto", targetLanguage: "vi",
           segments: batch.map(({ id, sourceText }) => ({ id, sourceText })),
-        }) as { segments?: Array<{ id: string; translatedText: string }> };
+        }, signal) as { segments?: Array<{ id: string; translatedText: string }> };
         const hitIds = new Set((cached.segments ?? []).map((item) => item.id));
         const missing = batch.filter((item) => !hitIds.has(item.id));
         if (missing.length) {
           const translated = await translateTrainingBatch({
             sourceLanguage: "auto", targetLanguage: "vi", segments: missing.map(({ id, sourceText }) => ({ id, sourceText })),
-          });
+          }, signal);
           const sourceById = new Map(missing.map((item) => [item.id, item.sourceText]));
           await postTrainingApi("/api/cache", {
             action: "translations:put", sourceLanguage: "auto", targetLanguage: "vi",
             segments: translated.segments.map((item) => ({ sourceText: sourceById.get(item.id), translatedText: item.translatedText })),
-          });
+          }, signal);
         }
       }
       result.trained += 1; result.segments += segments.length;
@@ -126,12 +158,21 @@ async function trainPlaylist(value: string): Promise<PlaylistTrainingResult> {
 function startPlaylistTraining(value: string): void {
   if (playlistTrainingJob) return;
   playlistTrainingCancelled = false;
+  playlistTrainingController = new AbortController();
+  const signal = playlistTrainingController.signal;
   playlistTrainingJob = chrome.storage.local.set({ playlistTraining: { running: true, message: "Đang khởi tạo playlist" } })
-    .then(() => trainPlaylist(value)).then(() => undefined, async (error: unknown) => {
+    .then(() => trainPlaylist(value, signal)).then(() => undefined, async (error: unknown) => {
     const message = error instanceof Error ? error.message : "Không thể train playlist";
+    if (signal.aborted) {
+      await chrome.storage.local.set({ playlistTraining: { running: false, message: "Đã dừng Train" } });
+      return;
+    }
     await chrome.storage.local.set({ playlistTraining: { running: false, message } });
     await notifyTraining("PXH Dubbing — Train thất bại", message);
-  }).finally(() => { playlistTrainingJob = undefined; });
+  }).finally(async () => {
+    await closeTrainingWindow();
+    playlistTrainingJob = undefined; playlistTrainingController = undefined;
+  });
 }
 
 async function ensureOffscreenDocument(): Promise<void> {
@@ -312,7 +353,9 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
   if (request?.action === "playlist-train-reset") {
     playlistTrainingCancelled = true;
-    void chrome.storage.local.set({ playlistTraining: { running: false, message: "Đã đặt lại job — có thể Train lại" } })
+    playlistTrainingController?.abort();
+    void closeTrainingWindow();
+    void chrome.storage.local.set({ playlistTraining: { running: false, message: "Đã dừng Train" } })
       .then(() => respond({ ok: true }));
     return true;
   }
