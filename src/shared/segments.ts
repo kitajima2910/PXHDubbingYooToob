@@ -60,11 +60,14 @@ export function mergeOverlappingSegments(segments: SubtitleSegment[], targetSpan
     if (!first || !last) return;
     const naturalEnd = Math.max(...group.map((item) => item.endMs));
     const endMs = Math.max(first.startMs + 500, nextStartMs ?? naturalEnd);
+    const translatedParts = group.map((item) => item.translatedText?.trim() ?? "");
+    const translatedText = translatedParts.every(Boolean) ? joinWithoutRepeatedBoundary(translatedParts) : undefined;
     merged.push({
       id: `merged-${first.id}-${last.id}`,
       startMs: first.startMs,
       endMs,
       sourceText: joinWithoutRepeatedBoundary(group.map((item) => item.sourceText)),
+      ...(translatedText ? { translatedText } : {}),
     });
     group = [];
   };

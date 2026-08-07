@@ -90,7 +90,7 @@ export async function createSpeech(text: string, rate: number, signal?: AbortSig
   try {
     const response = await chrome.runtime.sendMessage({
       action: "api-request", requestId, path: "/api/tts", responseType: "audio",
-      body: { text, voice: "vi-VN-HoaiMyNeural", rate },
+      body: { text, voice: "vi-VN-NamMinhNeural", rate },
     }) as ApiResponse<never>;
     if (!response.ok || !response.audioBase64) throw new Error(response.message ?? "Không thể tạo giọng nói");
     const binary = atob(response.audioBase64);

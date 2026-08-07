@@ -1,5 +1,5 @@
 import type { ExtensionState, SubtitleSegment } from "../shared/types";
-import { batchSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../shared/segments";
+import { batchSegments, mergeOverlappingSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../shared/segments";
 import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTranscript, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
@@ -122,11 +122,19 @@ async function startTrainingRecorder(video: HTMLVideoElement): Promise<void> {
 
 async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal): Promise<void> {
   const text = segment.translatedText ?? segment.sourceText;
-  if (chromeTtsAvailable) {
+  // Whisper đang thu chính tab: ưu tiên Chrome TTS nam để giọng dubbing không
+  // lọt ngược vào audio nhận dạng. Luồng transcript dùng MP3 Nam Minh ổn định,
+  // có duration thật để scheduler căn tốc độ chính xác hơn.
+  if (whisperMode && chromeTtsAvailable) {
     scheduler?.addSpeech(segment, text);
     return;
   }
-  scheduler?.add(segment, await createSpeech(text, 1, signal));
+  try {
+    scheduler?.add(segment, await createSpeech(text, 1, signal));
+  } catch (error) {
+    if (!chromeTtsAvailable) throw error;
+    scheduler?.addSpeech(segment, text);
+  }
 }
 
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>, onFirstAudio: () => void): Promise<number> {
@@ -142,20 +150,37 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
     let translated: SubtitleSegment[];
     try { translated = await translateForVideo(batch, signal); }
     catch (error) { for (const item of batch) queued.delete(item.id); throw error; }
+    // Dịch/cache theo từng caption gốc để tiếp tục tận dụng Translation Memory,
+    // sau đó mới ghép thành cụm nói dài hơn cho TTS tự nhiên.
+    const speechSegments = mergeOverlappingSegments(translated);
     update({ status: "speaking", message: state.processedSegments ? "Đang tạo bộ đệm" : "Đang tạo giọng nói" });
     let nextIndex = 0;
-    const worker = async (): Promise<void> => {
-      while (!signal.aborted) {
-        const segment = translated[nextIndex++];
-        if (!segment) return;
-        try {
-          await addPreparedSpeech(segment, signal);
-          update({ processedSegments: state.processedSegments + 1 });
-          if (state.processedSegments === 1) onFirstAudio();
-        } catch (error) { queued.delete(segment.id); if (!signal.aborted) console.warn("PXHDubbingYooToob: bỏ qua một câu TTS lỗi", error); }
+    const prepare = async (segment: SubtitleSegment): Promise<void> => {
+      try {
+        await addPreparedSpeech(segment, signal);
+        const isFirstAudio = state.processedSegments === 0;
+        update({ processedSegments: state.processedSegments + 1 });
+        if (isFirstAudio) onFirstAudio();
+      } catch (error) {
+        for (const source of batch) {
+          if (source.startMs >= segment.startMs && source.startMs < segment.endMs) queued.delete(source.id);
+        }
+        if (!signal.aborted) console.warn("PXHDubbingYooToob: bỏ qua một câu TTS lỗi", error);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, translated.length) }, worker));
+    // Chuẩn bị tuần tự cho đến khi câu đầu tiên thật sự sẵn sàng. Trước đây
+    // một trong ba câu phía sau có thể hoàn thành trước và làm video chạy sớm.
+    while (!signal.aborted && state.processedSegments === 0 && nextIndex < speechSegments.length) {
+      await prepare(speechSegments[nextIndex++]!);
+    }
+    const worker = async (): Promise<void> => {
+      while (!signal.aborted) {
+        const segment = speechSegments[nextIndex++];
+        if (!segment) return;
+        await prepare(segment);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, speechSegments.length) }, worker));
   }
   return candidates.length;
 }

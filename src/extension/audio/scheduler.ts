@@ -1,7 +1,8 @@
 import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
-const MAX_START_LATENESS_MS = 20_000;
+const MAX_START_LATENESS_MS = 2_500;
+const MIN_START_LATENESS_MS = 800;
 const MIN_SMOOTH_RATE = 0.95;
 const MAX_SMOOTH_RATE = 1.25;
 const MAX_PLAYBACK_RATE = 1.35;
@@ -16,6 +17,17 @@ export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs:
 
 export function speechCatchupRate(latenessMs: number): number {
   return 1 + Math.min(0.1, Math.max(0, latenessMs) / 40_000);
+}
+
+export function canStartSpeechAt(segment: SubtitleSegment, timelineMs: number): boolean {
+  const slotDurationMs = Math.max(500, segment.endMs - segment.startMs);
+  const allowedLatenessMs = Math.min(
+    MAX_START_LATENESS_MS,
+    Math.max(MIN_START_LATENESS_MS, slotDurationMs * 0.45),
+  );
+  return timelineMs >= segment.startMs
+    && timelineMs - segment.startMs <= allowedLatenessMs
+    && timelineMs < segment.endMs - 250;
 }
 
 export class AudioScheduler {
@@ -60,9 +72,13 @@ export class AudioScheduler {
     this.video.volume = Math.min(this.originalVolume, this.sourceVolume);
     const tick = (): void => {
       const now = this.video.currentTime * 1000;
+      for (const { segment } of this.items.values()) {
+        if (!this.played.has(segment.id) && now >= segment.startMs && !canStartSpeechAt(segment, now)) {
+          this.played.add(segment.id);
+        }
+      }
       const match = !this.active ? [...this.items.values()]
-        .filter(({ segment }) => now >= segment.startMs
-          && now - segment.startMs <= MAX_START_LATENESS_MS
+        .filter(({ segment }) => canStartSpeechAt(segment, now)
           && !this.played.has(segment.id))
         .sort((left, right) => left.segment.startMs - right.segment.startMs)[0] : undefined;
       if (match && !this.video.paused) this.play(match);
@@ -95,7 +111,7 @@ export class AudioScheduler {
           this.items.set(item.segment.id, fallback);
           this.active = undefined;
           this.played.delete(item.segment.id);
-          if (!this.video.paused && this.video.currentTime * 1000 - item.segment.startMs <= MAX_START_LATENESS_MS) this.play(fallback);
+          if (!this.video.paused && canStartSpeechAt(item.segment, this.video.currentTime * 1000)) this.play(fallback);
         } catch (error) {
           console.warn("PXHDubbingYooToob: TTS dự phòng lỗi", error);
           if (this.active?.id === item.segment.id) this.stopActive();

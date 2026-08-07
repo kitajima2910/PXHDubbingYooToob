@@ -537,14 +537,26 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return true;
   }
   if (request?.action === "tts-status") {
-    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) => voice.lang?.toLowerCase().startsWith("vi")) }));
+    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) => {
+      const name = voice.voiceName?.toLocaleLowerCase() ?? "";
+      return voice.lang?.toLocaleLowerCase().startsWith("vi") === true
+        && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
+    }) }));
     return true;
   }
   if (request?.action === "tts-speak" && request.text) {
     chrome.tts.getVoices((voices) => {
-      const vietnamese = voices.filter((item) => item.lang?.toLowerCase().startsWith("vi"))
-        .sort((left, right) => Number(Boolean(left.remote)) - Number(Boolean(right.remote)));
-      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng đọc tiếng Việt" }); return; }
+      const vietnamese = voices.filter((item) => {
+        const name = item.voiceName?.toLocaleLowerCase() ?? "";
+        return item.lang?.toLocaleLowerCase().startsWith("vi") === true
+          && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
+      }).sort((left, right) => {
+        const leftName = left.voiceName?.toLocaleLowerCase() ?? "";
+        const rightName = right.voiceName?.toLocaleLowerCase() ?? "";
+        return Number(!leftName.includes("namminh") && !leftName.includes("nam minh"))
+          - Number(!rightName.includes("namminh") && !rightName.includes("nam minh"));
+      });
+      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng nam tiếng Việt" }); return; }
       const attempt = (index: number): void => {
         const voice = vietnamese[index];
         if (!voice) { respond({ ok: false, message: "Tất cả giọng Chrome tiếng Việt đều lỗi" }); return; }

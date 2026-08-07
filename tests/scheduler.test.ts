@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { speechCatchupRate, speechPlaybackRate } from "../src/extension/audio/scheduler";
+import { canStartSpeechAt, speechCatchupRate, speechPlaybackRate } from "../src/extension/audio/scheduler";
 
 describe("tốc độ phát giọng nói", () => {
   it("tăng vừa phải câu dài để giảm tích lũy độ trễ", () => expect(speechPlaybackRate(4, 2_000, 1)).toBe(1.25));
@@ -9,5 +9,12 @@ describe("tốc độ phát giọng nói", () => {
     expect(speechCatchupRate(0)).toBe(1);
     expect(speechCatchupRate(4_000)).toBe(1.1);
     expect(speechCatchupRate(20_000)).toBe(1.1);
+  });
+
+  it("bỏ câu đã trễ thay vì đọc backlog lệch hình", () => {
+    const segment = { id: "a", startMs: 10_000, endMs: 16_000, sourceText: "Xin chào" };
+    expect(canStartSpeechAt(segment, 12_000)).toBe(true);
+    expect(canStartSpeechAt(segment, 13_000)).toBe(false);
+    expect(canStartSpeechAt(segment, 15_900)).toBe(false);
   });
 });

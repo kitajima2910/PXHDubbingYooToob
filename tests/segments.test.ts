@@ -54,4 +54,18 @@ describe("xử lý đoạn phụ đề", () => {
     ]);
     expect(result[0]?.sourceText).toBe("This is how it works today in practice.");
   });
+
+  it("ghép caption ngắn thành cụm nói tự nhiên nhưng giữ timeline", () => {
+    const result = mergeOverlappingSegments([
+      { id: "1", startMs: 0, endMs: 2_000, sourceText: "This is", translatedText: "Đây là" },
+      { id: "2", startMs: 2_000, endMs: 4_000, sourceText: "a smoother", translatedText: "một câu" },
+      { id: "3", startMs: 4_000, endMs: 6_000, sourceText: "sentence.", translatedText: "mượt hơn." },
+      { id: "4", startMs: 6_000, endMs: 8_000, sourceText: "Next part.", translatedText: "Phần tiếp theo." },
+    ]);
+    expect(result[0]).toMatchObject({
+      startMs: 0, endMs: 6_000,
+      sourceText: "This is a smoother sentence.", translatedText: "Đây là một câu mượt hơn.",
+    });
+    expect(result[1]).toMatchObject({ startMs: 6_000, sourceText: "Next part." });
+  });
 });

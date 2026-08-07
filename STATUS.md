@@ -161,3 +161,13 @@ Bước 1–2 — `Transcript DOM/Groq Whisper → cache Neon → dịch tiếng
 - Kiểm tra production với extension ID phát triển: CORS đạt, translate/TTS trả 200; transcript trên Vercel trả 502 do phía YouTube/datacenter. Fallback transcript vì vậy chạy trong service worker bằng IP người xem, vẫn chỉ nhận `videoId` hợp lệ; Vercel giữ dịch và TTS.
 - Service worker tự phát hiện transcript timestamp theo giây hay milliseconds bằng median duration, chuẩn hóa trước khi lọc cửa sổ và thử đơn vị còn lại nếu vùng kết quả rỗng.
 > Xác minh UI/đồng bộ mới nhất: rút ngắn timeout bridge 20 → 12 giây, thời gian chờ player response 5 → 2 giây và chờ transcript UI 7 → 3,5 giây; `npm run check`, 8/8 test và production build đều đạt.
+
+## Giọng nam + Smooth dubbing v1 — 2026-08-07
+
+- Nguyên nhân gốc: client hard-code `vi-VN-HoaiMyNeural`, Chrome TTS chọn giọng Việt bất kỳ; video có thể chạy khi một trong ba câu phía sau chuẩn bị xong trước câu đầu; scheduler còn phát backlog trễ tới 20 giây nên giọng dễ lệch hình.
+- Đổi giọng mặc định sang nam `vi-VN-NamMinhNeural`. Luồng transcript ưu tiên MP3 Nam Minh để có duration thật cho việc khớp tốc độ; Whisper chỉ dùng Chrome TTS khi tìm được rõ ràng một giọng nam tiếng Việt, nếu không vẫn dùng Nam Minh phía server.
+- Translation Memory vẫn lookup/ghi theo caption gốc để giữ cache hit. Sau khi dịch, các caption ngắn mới được ghép thành cụm nói tự nhiên khoảng 6 giây, đồng thời ghép cả `translatedText` và giữ timeline đầu/cuối.
+- Câu đầu được chuẩn bị tuần tự trước khi cho video chạy; các câu sau tiếp tục tạo song song trong bộ đệm. Câu trễ chỉ còn được bắt đầu trong cửa sổ 0,8–2,5 giây tùy độ dài và bị bỏ qua khi gần hết slot, tránh đọc nối backlog lệch hành động.
+- File sửa: `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/popup.ts`, `src/shared/segments.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`, `STATUS.md`.
+- Kiểm tra: `npm run check` đạt; 27/27 test đạt; production build đạt và guard xác nhận `content.js` standalone. Smoke test thật tạo được 18.720 byte audio bằng `vi-VN-NamMinhNeural`.
+- Còn lại: chưa có nhận dạng nhiều người nói/gán nhiều giọng và chưa tách giọng nói khỏi nhạc nền như tính năng thành viên của youtube-dubbing.com; cần model diarization/source separation riêng nếu muốn đạt đúng mức đó. Chưa chạy E2E trực tiếp trong Brave với extension vừa reload.

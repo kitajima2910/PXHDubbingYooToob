@@ -9,7 +9,7 @@ app.innerHTML = `
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
-    <div><span>Giọng đọc</span><strong>Chrome / Hoài My</strong></div>
+    <div><span>Giọng đọc</span><strong>Nam Minh (nam)</strong></div>
     <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
