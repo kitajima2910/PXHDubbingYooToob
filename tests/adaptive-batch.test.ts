@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runAdaptiveBatch } from "../src/extension/training/adaptive-batch";
+import { runAdaptiveBatchSettled } from "../src/extension/translation/adaptive-batch";
 
 describe("adaptive training batch", () => {
   it("giữ nguyên batch khi provider thành công", async () => {
@@ -22,5 +23,13 @@ describe("adaptive training batch", () => {
       if (items.includes(2)) throw new Error("câu lỗi");
       return items;
     })).rejects.toThrow("câu lỗi");
+  });
+
+  it("giữ kết quả thành công và tách riêng câu đơn thất bại", async () => {
+    const result = await runAdaptiveBatchSettled([1, 2, 3], async (items) => {
+      if (items.includes(2)) throw new Error("câu lỗi");
+      return items.map((item) => item * 10);
+    });
+    expect(result).toEqual({ results: [10, 30], failed: [2] });
   });
 });

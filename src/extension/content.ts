@@ -348,7 +348,9 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     const firstAudio = new Promise<void>((resolve) => { markFirstAudio = resolve; });
     const completion = buildWindow(captions.segments, video, sessionController.signal, queued, markFirstAudio);
     const completedBeforeAudio = await Promise.race([firstAudio.then(() => false), completion.then(() => true)]);
-    if (completedBeforeAudio && state.processedSegments === 0) throw new Error("Không thể tạo audio cho các câu sắp phát");
+    if (completedBeforeAudio && state.processedSegments === 0) {
+      update({ status: "ready", message: "Chưa có bản dịch cache — đang tiếp tục theo dõi" });
+    }
     if (resumeWhenReady && !sessionController.signal.aborted) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
     void completion.then(() => {

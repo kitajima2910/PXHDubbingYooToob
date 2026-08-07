@@ -1,6 +1,7 @@
 import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
 import { translateWithBrowser } from "../translation/browser-translator";
+import { runAdaptiveBatchSettled } from "../translation/adaptive-batch";
 
 interface ApiResponse<T> { ok: boolean; status: number; data?: T; audioBase64?: string; mimeType?: string; message?: string }
 export interface CacheContext { videoId: string; sourceLanguage: string }
@@ -40,20 +41,34 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
   const missing = segments.filter((segment) => !cachedById.has(segment.id));
   let translatedMissing: SubtitleSegment[] = [];
   if (missing.length) {
-    try {
-      const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
-        segments: missing.map(({ id, sourceText }) => ({ id, sourceText })), sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
-      }, signal);
-      translatedMissing = mapTranslations(missing, result.segments);
-    } catch (cloudError) {
-      if (signal?.aborted) throw cloudError;
+    let cloudUnavailable = false;
+    const cloud = await runAdaptiveBatchSettled(missing, async (batch) => {
+      if (cloudUnavailable) throw new Error("Groq đang tạm không khả dụng");
       try {
-        translatedMissing = await translateWithBrowser(missing);
+        const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
+          segments: batch.map(({ id, sourceText }) => ({ id, sourceText })), sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
+        }, signal);
+        const expected = new Set(batch.map((segment) => segment.id));
+        if (result.segments.length !== batch.length || new Set(result.segments.map((item) => item.id)).size !== batch.length
+          || result.segments.some((item) => !expected.has(item.id) || !item.translatedText?.trim())) {
+          throw new Error("Groq trả thiếu hoặc sai ánh xạ bản dịch");
+        }
+        return mapTranslations(batch, result.segments);
+      } catch (error) {
+        if (batch.length === 1) cloudUnavailable = true;
+        throw error;
+      }
+    });
+    if (signal?.aborted) throw new DOMException("Đã hủy dịch", "AbortError");
+    translatedMissing = cloud.results;
+    if (cloud.failed.length) {
+      try {
+        const local = await translateWithBrowser(cloud.failed);
+        translatedMissing.push(...local);
         console.info("PXHDubbingYooToob: Groq không khả dụng, đang dùng Translator API trên máy");
       } catch (localError) {
-        const cloudMessage = cloudError instanceof Error ? cloudError.message : "Groq không khả dụng";
         const localMessage = localError instanceof Error ? localError.message : "dịch trên máy không khả dụng";
-        throw new Error(`${cloudMessage}; dự phòng offline: ${localMessage}`);
+        console.info(`PXHDubbingYooToob: chế độ cache-only; bỏ qua ${cloud.failed.length} câu chưa dịch: ${localMessage}`);
       }
     }
     if (cache) void cachePost({
@@ -62,7 +77,10 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
     }).catch(() => undefined);
   }
   const translatedById = new Map(translatedMissing.map((segment) => [segment.id, segment.translatedText ?? segment.sourceText]));
-  return segments.map((segment) => ({ ...segment, translatedText: cachedById.get(segment.id) ?? translatedById.get(segment.id) ?? segment.sourceText }));
+  return segments.flatMap((segment) => {
+    const translatedText = cachedById.get(segment.id) ?? translatedById.get(segment.id);
+    return translatedText ? [{ ...segment, translatedText }] : [];
+  });
 }
 
 export async function createSpeech(text: string, rate: number, signal?: AbortSignal): Promise<Blob> {
