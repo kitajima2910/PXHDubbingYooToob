@@ -1,5 +1,6 @@
 import { YoutubeTranscript } from "youtube-transcript";
 import { parseYouTubeTrainingTarget } from "./training/youtube-url";
+import { runAdaptiveBatch } from "./training/adaptive-batch";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
@@ -44,15 +45,25 @@ async function postTrainingApi(path: "/api/cache" | "/api/translate" | "/api/tra
 }
 
 async function translateTrainingBatch(body: unknown, signal: AbortSignal): Promise<{ segments: Array<{ id: string; translatedText: string }> }> {
+  const requested = (body as { segments?: Array<{ id: string }> } | null)?.segments ?? [];
+  const validate = (result: { segments?: Array<{ id: string; translatedText: string }> }): { segments: Array<{ id: string; translatedText: string }> } => {
+    const expected = new Set(requested.map((item) => item.id));
+    const returned = new Set((result.segments ?? []).map((item) => item.id));
+    if (!requested.length || result.segments?.length !== requested.length || returned.size !== requested.length
+      || result.segments.some((item) => !expected.has(item.id) || !item.translatedText?.trim())) {
+      throw new Error("Groq trả thiếu hoặc sai ánh xạ bản dịch");
+    }
+    return { segments: result.segments };
+  };
   const stored = await chrome.storage.local.get("groqApiKey");
   const customKey = typeof stored.groqApiKey === "string" ? stored.groqApiKey.trim() : "";
   if (customKey) {
     const direct = await requestGroqDirect("/api/translate", body, customKey, signal);
-    if (direct.ok) return direct.data as { segments: Array<{ id: string; translatedText: string }> };
+    if (direct.ok) return validate(direct.data as { segments?: Array<{ id: string; translatedText: string }> });
     const quotaFailure = direct.status === 429 || /quota|rate.?limit|limit reached|blocked_api_access/i.test(direct.message ?? "");
     if (!quotaFailure) throw new Error(direct.message ?? "Groq không thể dịch batch playlist");
   }
-  return postTrainingApi("/api/translate", body, signal);
+  return validate(await postTrainingApi("/api/translate", body, signal));
 }
 
 async function transcribeTrainingChunk(chunk: TrainingAudioChunk, signal: AbortSignal): Promise<{ segments: BackgroundSegment[] }> {
@@ -233,14 +244,18 @@ async function trainPlaylist(value: string, signal: AbortSignal): Promise<Playli
         const hitIds = new Set((cached.segments ?? []).map((item) => item.id));
         const missing = batch.filter((item) => !hitIds.has(item.id));
         if (missing.length) {
-          const translated = await translateTrainingBatch({
-            sourceLanguage: "auto", targetLanguage: "vi", segments: missing.map(({ id, sourceText }) => ({ id, sourceText })),
-          }, signal);
           const sourceById = new Map(missing.map((item) => [item.id, item.sourceText]));
-          await postTrainingApi("/api/cache", {
-            action: "translations:put", sourceLanguage: "auto", targetLanguage: "vi",
-            segments: translated.segments.map((item) => ({ sourceText: sourceById.get(item.id), translatedText: item.translatedText })),
-          }, signal);
+          await runAdaptiveBatch(missing, async (translationBatch) => {
+            const translated = await translateTrainingBatch({
+              sourceLanguage: "auto", targetLanguage: "vi",
+              segments: translationBatch.map(({ id, sourceText }) => ({ id, sourceText })),
+            }, signal);
+            await postTrainingApi("/api/cache", {
+              action: "translations:put", sourceLanguage: "auto", targetLanguage: "vi",
+              segments: translated.segments.map((item) => ({ sourceText: sourceById.get(item.id), translatedText: item.translatedText })),
+            }, signal);
+            return translated.segments;
+          });
         }
       }
       result.trained += 1; result.segments += segments.length;
