@@ -320,8 +320,30 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; startMs?: number }, _sender, respond) => {
   if (request.action === "status") { respond(state); return; }
+  if (request.action === "training-playback-start") {
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (!video) { respond({ ok: false, message: "Không tìm thấy trình phát YouTube" }); return; }
+    video.loop = false;
+    video.playbackRate = 1;
+    video.currentTime = Math.max(0, (request.startMs ?? 0) / 1000);
+    void video.play().then(
+      () => respond({ ok: true, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : 0 }),
+      (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "YouTube không cho tự phát video" }),
+    );
+    return true;
+  }
+  if (request.action === "training-playback-status") {
+    const video = document.querySelector<HTMLVideoElement>("video");
+    respond(video ? { ok: true, ended: video.ended, paused: video.paused, currentMs: Math.round(video.currentTime * 1000) } : { ok: false });
+    return;
+  }
+  if (request.action === "training-playback-stop") {
+    document.querySelector<HTMLVideoElement>("video")?.pause();
+    respond({ ok: true });
+    return;
+  }
   if (request.action === "training-transcript") {
     void loadYouTubeCaptions(45_000).then(
       (captions) => respond({ segments: captions.segments }),

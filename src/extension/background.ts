@@ -5,12 +5,14 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000
 const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
 const requests = new Map<string, AbortController>();
 
-interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number }
+interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number; failedVideoIds: string[] }
+interface TrainingAudioChunk { audioBase64: string; mimeType: string; durationMs: number }
 let playlistTrainingJob: Promise<void> | undefined;
 let playlistTrainingCancelled = false;
 let playlistTrainingController: AbortController | undefined;
 let playlistTrainingTabId: number | undefined;
 let playlistTrainingWindowId: number | undefined;
+let trainingAudioCapture: { tabId: number; chunks: TrainingAudioChunk[]; notify: (() => void) | undefined } | undefined;
 
 async function resetInterruptedTraining(): Promise<void> {
   const stored = (await chrome.storage.local.get("playlistTraining")).playlistTraining as { running?: boolean } | undefined;
@@ -21,7 +23,7 @@ async function resetInterruptedTraining(): Promise<void> {
 chrome.runtime.onInstalled.addListener(() => { void resetInterruptedTraining(); });
 chrome.runtime.onStartup.addListener(() => { void resetInterruptedTraining(); });
 
-async function postTrainingApi(path: "/api/cache" | "/api/translate", body: unknown, signal?: AbortSignal): Promise<any> {
+async function postTrainingApi(path: "/api/cache" | "/api/translate" | "/api/transcribe", body: unknown, signal?: AbortSignal): Promise<any> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -51,6 +53,19 @@ async function translateTrainingBatch(body: unknown, signal: AbortSignal): Promi
     if (!quotaFailure) throw new Error(direct.message ?? "Groq không thể dịch batch playlist");
   }
   return postTrainingApi("/api/translate", body, signal);
+}
+
+async function transcribeTrainingChunk(chunk: TrainingAudioChunk, signal: AbortSignal): Promise<{ segments: BackgroundSegment[] }> {
+  const body = { audioBase64: chunk.audioBase64, mimeType: chunk.mimeType };
+  const stored = await chrome.storage.local.get("groqApiKey");
+  const customKey = typeof stored.groqApiKey === "string" ? stored.groqApiKey.trim() : "";
+  if (customKey) {
+    const direct = await requestGroqDirect("/api/transcribe", body, customKey, signal);
+    if (direct.ok) return direct.data as { segments: BackgroundSegment[] };
+    const quotaFailure = direct.status === 429 || /quota|rate.?limit|limit reached|blocked_api_access/i.test(direct.message ?? "");
+    if (!quotaFailure) throw new Error(direct.message ?? "Groq không thể nhận dạng audio train");
+  }
+  return postTrainingApi("/api/transcribe", body, signal);
 }
 
 async function playlistVideoIds(value: string): Promise<string[]> {
@@ -102,6 +117,93 @@ async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Pro
   return response.segments;
 }
 
+function waitForTrainingChunk(capture: NonNullable<typeof trainingAudioCapture>, signal: AbortSignal): Promise<TrainingAudioChunk> {
+  const queued = capture.chunks.shift();
+  if (queued) return Promise.resolve(queued);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { capture.notify = undefined; reject(new Error("Không nhận được audio từ video trong 12 giây")); }, 12_000);
+    const abort = (): void => { clearTimeout(timer); capture.notify = undefined; reject(new DOMException("Job train đã dừng", "AbortError")); };
+    capture.notify = () => {
+      clearTimeout(timer); signal.removeEventListener("abort", abort);
+      capture.notify = undefined;
+      const chunk = capture.chunks.shift();
+      if (chunk) resolve(chunk); else reject(new Error("Audio train rỗng"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
+  const tabId = playlistTrainingTabId;
+  if (tabId === undefined) throw new Error("Worker train không còn hoạt động");
+  await ensureOffscreenDocument();
+  const captureStatus = await chrome.runtime.sendMessage({ action: "capture-offscreen-status" }) as { active?: boolean; tabId?: number };
+  if (captureStatus?.active && captureStatus.tabId !== tabId) throw new Error("Đang dùng microphone audio cho một phiên dubbing khác; hãy retry video sau");
+  const progressStorage = await chrome.storage.local.get("playlistTrainingWhisperProgress");
+  const progress = (progressStorage.playlistTrainingWhisperProgress ?? {}) as Record<string, number>;
+  let capturedUntilMs = Math.max(0, Number(progress[videoId] ?? 0));
+  const cached = await postTrainingApi("/api/cache", {
+    action: "transcript:get", videoId, sourceLanguage: "auto",
+  }, signal) as { segments?: BackgroundSegment[]; complete?: boolean };
+  if (cached.complete && cached.segments?.length) return cached.segments;
+  trainingAudioCapture = { tabId, chunks: [], notify: undefined };
+  const allSegments: BackgroundSegment[] = [...(cached.segments ?? [])];
+  let completed = false;
+  try {
+    await ensureTabCapture(tabId, 0);
+    const started = await chrome.tabs.sendMessage(tabId, { action: "training-playback-start", startMs: capturedUntilMs }) as { ok?: boolean; message?: string };
+    if (!started?.ok) throw new Error(started?.message ?? "Không thể phát video để nhận dạng audio");
+    while (!signal.aborted) {
+      const chunk = await waitForTrainingChunk(trainingAudioCapture, signal);
+      const fromMs = capturedUntilMs;
+      const toMs = fromMs + Math.max(500, chunk.durationMs);
+      const result = await transcribeTrainingChunk(chunk, signal);
+      const timed = (result.segments ?? []).map((segment, index) => ({
+        ...segment, id: `train-whisper-${fromMs}-${index}`,
+        startMs: fromMs + segment.startMs, endMs: fromMs + Math.max(segment.startMs + 500, segment.endMs),
+      }));
+      await postTrainingApi("/api/cache", {
+        action: "transcript:put", videoId, sourceLanguage: "auto", source: "Playlist trainer — Groq Whisper",
+        complete: false, segments: timed, window: { fromMs, toMs },
+      }, signal);
+      allSegments.push(...timed);
+      capturedUntilMs = toMs;
+      progress[videoId] = capturedUntilMs;
+      await chrome.storage.local.set({ playlistTrainingWhisperProgress: progress });
+      await chrome.storage.local.set({ playlistTraining: { running: true, message: `Whisper ${videoId}: ${Math.round(capturedUntilMs / 1000)} giây` } });
+      const playback = await chrome.tabs.sendMessage(tabId, { action: "training-playback-status" }) as { ended?: boolean; currentMs?: number };
+      if (playback?.ended || (typeof playback?.currentMs === "number" && playback.currentMs + 1_000 < capturedUntilMs)) { completed = true; break; }
+    }
+  } finally {
+    trainingAudioCapture = undefined;
+    await chrome.tabs.sendMessage(tabId, { action: "training-playback-stop" }).catch(() => undefined);
+    await stopTabCapture();
+  }
+  if (completed) {
+    delete progress[videoId];
+    await chrome.storage.local.set({ playlistTrainingWhisperProgress: progress });
+  }
+  return mergeTranscriptSegments(allSegments);
+}
+
+async function loadTrainingTranscriptWithFallback(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
+  let transcriptError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try { return await loadTrainingTranscript(videoId, signal); }
+    catch (error) {
+      transcriptError = error;
+      if (signal.aborted) throw error;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+  try { return await whisperTrainingTranscript(videoId, signal); }
+  catch (whisperError) {
+    const transcriptMessage = transcriptError instanceof Error ? transcriptError.message : "không lấy được transcript";
+    const whisperMessage = whisperError instanceof Error ? whisperError.message : "Whisper thất bại";
+    throw new Error(`Transcript: ${transcriptMessage}; fallback Whisper: ${whisperMessage}`);
+  }
+}
+
 async function closeTrainingWindow(): Promise<void> {
   const windowId = playlistTrainingWindowId;
   playlistTrainingWindowId = undefined;
@@ -117,12 +219,12 @@ async function notifyTraining(title: string, message: string): Promise<void> {
 
 async function trainPlaylist(value: string, signal: AbortSignal): Promise<PlaylistTrainingResult> {
   const videoIds = await playlistVideoIds(value);
-  const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0 };
+  const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0, failedVideoIds: [] };
   await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc video/playlist" } });
   for (const [videoIndex, videoId] of videoIds.entries()) {
     if (playlistTrainingCancelled) throw new Error("Job train đã được hủy");
     try {
-      const segments = (await loadTrainingTranscript(videoId, signal)).slice(0, 2_000);
+      const segments = (await loadTrainingTranscriptWithFallback(videoId, signal)).slice(0, 2_000);
       if (!segments.length) throw new Error("Transcript rỗng");
       await postTrainingApi("/api/cache", {
         action: "transcript:put", videoId, sourceLanguage: "auto", source: "Playlist trainer", complete: true, segments,
@@ -148,12 +250,14 @@ async function trainPlaylist(value: string, signal: AbortSignal): Promise<Playli
       }
       result.trained += 1; result.segments += segments.length;
     } catch (error) {
-      console.warn(`PXHDubbingYooToob: bỏ qua train video ${videoId}`, error);
+      console.info(`PXHDubbingYooToob: chưa train được video ${videoId}`, error instanceof Error ? error.message : error);
       result.skipped += 1;
+      result.failedVideoIds.push(videoId);
     }
     await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: `Đã xử lý ${videoIndex + 1}/${videoIds.length} video` } });
   }
-  await chrome.storage.local.set({ playlistTraining: { ...result, running: false, message: `Hoàn tất ${result.trained}/${result.total} video` } });
+  const failedSuffix = result.failedVideoIds.length ? ` — thử lại: ${result.failedVideoIds.slice(0, 4).join(", ")}${result.failedVideoIds.length > 4 ? "…" : ""}` : "";
+  await chrome.storage.local.set({ playlistTraining: { ...result, running: false, message: `Hoàn tất ${result.trained}/${result.total} video${failedSuffix}` } });
   await notifyTraining("PXH Dubbing — Train hoàn tất", `Đã train ${result.trained}/${result.total} video, bỏ qua ${result.skipped}.`);
   return result;
 }
@@ -407,6 +511,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "tts-pause") { chrome.tts.pause(); respond({ ok: true }); return; }
   if (request?.action === "tts-resume") { chrome.tts.resume(); respond({ ok: true }); return; }
   if (request?.action === "capture-chunk" && request.tabId !== undefined && request.audioBase64 && request.mimeType && request.durationMs) {
+    if (trainingAudioCapture?.tabId === request.tabId) {
+      trainingAudioCapture.chunks.push({ audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs });
+      trainingAudioCapture.notify?.();
+      respond({ ok: true }); return;
+    }
     void chrome.tabs.sendMessage(request.tabId, { action: "whisper-chunk", audioBase64: request.audioBase64, mimeType: request.mimeType, durationMs: request.durationMs }).catch(() => undefined);
     respond({ ok: true }); return;
   }
