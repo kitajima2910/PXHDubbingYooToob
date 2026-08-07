@@ -4,6 +4,94 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000
 const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
 const requests = new Map<string, AbortController>();
 
+interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number }
+
+async function postTrainingApi(path: "/api/cache" | "/api/translate", body: unknown): Promise<any> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+    throw new Error(payload?.error?.message ?? `Backend trả lỗi ${response.status}`);
+  }
+  return response.json();
+}
+
+async function translateTrainingBatch(body: unknown): Promise<{ segments: Array<{ id: string; translatedText: string }> }> {
+  const stored = await chrome.storage.local.get("groqApiKey");
+  const customKey = typeof stored.groqApiKey === "string" ? stored.groqApiKey.trim() : "";
+  if (customKey) {
+    const direct = await requestGroqDirect("/api/translate", body, customKey, new AbortController().signal);
+    if (direct.ok) return direct.data as { segments: Array<{ id: string; translatedText: string }> };
+    const quotaFailure = direct.status === 429 || /quota|rate.?limit|limit reached|blocked_api_access/i.test(direct.message ?? "");
+    if (!quotaFailure) throw new Error(direct.message ?? "Groq không thể dịch batch playlist");
+  }
+  return postTrainingApi("/api/translate", body);
+}
+
+async function playlistVideoIds(value: string): Promise<string[]> {
+  const url = new URL(value);
+  if (!/(^|\.)youtube\.com$/.test(url.hostname) || !url.searchParams.get("list")) throw new Error("URL playlist YouTube không hợp lệ");
+  const response = await fetch(url.toString());
+  if (!response.ok) throw new Error(`YouTube trả lỗi ${response.status}`);
+  const html = await response.text();
+  const ids = [...html.matchAll(/"videoId":"([A-Za-z0-9_-]{11})"/g)].map((match) => match[1]!);
+  const current = url.searchParams.get("v");
+  if (current && /^[A-Za-z0-9_-]{11}$/.test(current)) ids.unshift(current);
+  const unique = [...new Set(ids)].slice(0, 100);
+  if (!unique.length) throw new Error("Không tìm thấy video công khai trong playlist");
+  return unique;
+}
+
+async function trainPlaylist(value: string): Promise<PlaylistTrainingResult> {
+  const videoIds = await playlistVideoIds(value);
+  const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0 };
+  await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc playlist" } });
+  for (const [videoIndex, videoId] of videoIds.entries()) {
+    try {
+      const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+      const raw = transcript.flatMap((item, index) => {
+        const sourceText = item.text.replace(/\s+/g, " ").trim();
+        if (!sourceText) return [];
+        const scale = item.duration > 0 && item.duration < 100 ? 1_000 : 1;
+        const startMs = Math.round(item.offset * scale);
+        return [{ id: `${startMs}-${index}`, startMs, endMs: startMs + Math.max(200, Math.round(item.duration * scale)), sourceText }];
+      });
+      const segments = mergeTranscriptSegments(raw).slice(0, 2_000);
+      if (!segments.length) throw new Error("Transcript rỗng");
+      await postTrainingApi("/api/cache", {
+        action: "transcript:put", videoId, sourceLanguage: "auto", source: "Playlist trainer", complete: true, segments,
+      });
+      for (let index = 0; index < segments.length; index += 20) {
+        const batch = segments.slice(index, index + 20);
+        const cached = await postTrainingApi("/api/cache", {
+          action: "translations:get", sourceLanguage: "auto", targetLanguage: "vi",
+          segments: batch.map(({ id, sourceText }) => ({ id, sourceText })),
+        }) as { segments?: Array<{ id: string; translatedText: string }> };
+        const hitIds = new Set((cached.segments ?? []).map((item) => item.id));
+        const missing = batch.filter((item) => !hitIds.has(item.id));
+        if (missing.length) {
+          const translated = await translateTrainingBatch({
+            sourceLanguage: "auto", targetLanguage: "vi", segments: missing.map(({ id, sourceText }) => ({ id, sourceText })),
+          });
+          const sourceById = new Map(missing.map((item) => [item.id, item.sourceText]));
+          await postTrainingApi("/api/cache", {
+            action: "translations:put", sourceLanguage: "auto", targetLanguage: "vi",
+            segments: translated.segments.map((item) => ({ sourceText: sourceById.get(item.id), translatedText: item.translatedText })),
+          });
+        }
+      }
+      result.trained += 1; result.segments += segments.length;
+    } catch (error) {
+      console.warn(`PXHDubbingYooToob: bỏ qua train video ${videoId}`, error);
+      result.skipped += 1;
+    }
+    await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: `Đã xử lý ${videoIndex + 1}/${videoIds.length} video` } });
+  }
+  await chrome.storage.local.set({ playlistTraining: { ...result, running: false, message: `Hoàn tất ${result.trained}/${result.total} video` } });
+  return result;
+}
+
 async function ensureOffscreenDocument(): Promise<void> {
   const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] });
   if (contexts.length) return;
@@ -180,6 +268,14 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
+  if (request?.action === "playlist-train" && typeof request.body === "string") {
+    void trainPlaylist(request.body).then((data) => respond({ ok: true, data }), (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Không thể train playlist";
+      void chrome.storage.local.set({ playlistTraining: { running: false, message } });
+      respond({ ok: false, message });
+    });
+    return true;
+  }
   if (request?.action === "capture-start") {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }

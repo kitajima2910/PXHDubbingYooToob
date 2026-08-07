@@ -15,7 +15,17 @@ CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_cache (
 );
 
 CREATE INDEX IF NOT EXISTS pxh_transcript_cache_timeline
-ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms);
+  ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms);
+
+CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_window_cache (
+  video_id varchar(11) NOT NULL,
+  source_language varchar(16) NOT NULL,
+  start_ms bigint NOT NULL,
+  end_ms bigint NOT NULL,
+  source varchar(80) NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (video_id, source_language, start_ms, end_ms)
+);
 
 CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_translation_cache (
   video_id varchar(11) NOT NULL,

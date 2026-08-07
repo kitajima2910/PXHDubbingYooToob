@@ -108,8 +108,8 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   update({ status: "loading", message: "Đang nhận dạng giọng nói" });
   const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
   const cached = await loadCachedTranscript(cacheContext(), capturedStartMs, chunk.capturedEndMs, signal);
-  let sourceSegments = cached?.segments ?? [];
-  const fromCache = sourceSegments.length > 0;
+  let sourceSegments = cached?.covered ? cached.segments : [];
+  const fromCache = cached?.covered === true;
   if (!fromCache) {
     const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
     if (signal.aborted) return;
@@ -118,6 +118,11 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     sourceSegments = vietnameseFeedback ? [] : result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
   }
   if (!sourceSegments.length) {
+    if (!fromCache) {
+      await saveCachedTranscript(cacheContext(), "Groq Whisper", [], false, signal, {
+        fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
+      });
+    }
     update({ status: "ready", message: "Đang nghe video" });
     if (resumeAfterWhisperWarmup) {
       resumeAfterWhisperWarmup = false;
@@ -143,7 +148,9 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
       startMs: segment.startMs - whisperDelaySeconds * 1000,
       endMs: segment.endMs - whisperDelaySeconds * 1000,
     }));
-    await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal);
+    await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal, {
+      fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
+    });
   }
   update({ status: "translating", message: "Đang dịch giọng nói" });
   const translated = await translateForVideo(segments, signal);

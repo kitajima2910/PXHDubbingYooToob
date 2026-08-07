@@ -62,6 +62,17 @@ async function ensureTranscriptSchema(sql: NeonQueryFunction<false, false>): Pro
       CREATE INDEX IF NOT EXISTS pxh_transcript_cache_timeline
       ON pxh_dubbing.pxh_transcript_cache (video_id, source_language, start_ms)
     `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS pxh_dubbing.pxh_transcript_window_cache (
+        video_id varchar(11) NOT NULL,
+        source_language varchar(16) NOT NULL,
+        start_ms bigint NOT NULL,
+        end_ms bigint NOT NULL,
+        source varchar(80) NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (video_id, source_language, start_ms, end_ms)
+      )
+    `);
   })().catch((error) => { transcriptSchemaReady = undefined; throw error; });
   await transcriptSchemaReady;
 }
@@ -90,7 +101,7 @@ export async function readTranscript(
   context: CacheContext,
   fromMs?: number,
   toMs?: number,
-): Promise<{ segments: SubtitleSegment[]; source?: string; complete: boolean }> {
+): Promise<{ segments: SubtitleSegment[]; source?: string; complete: boolean; covered?: boolean }> {
   const sql = database(transcriptDatabaseUrl());
   if (!sql) return { segments: [], complete: false };
   await ensureTranscriptSchema(sql);
@@ -105,6 +116,15 @@ export async function readTranscript(
     segment_id: string; start_ms: string | number; end_ms: string | number; source_text: string; source: string; is_complete: boolean;
   }>;
   const source = rows[0]?.source;
+  let covered: boolean | undefined;
+  if (fromMs !== undefined && toMs !== undefined) {
+    const windows = await sql.query(`
+      SELECT 1 FROM pxh_dubbing.pxh_transcript_window_cache
+      WHERE video_id = $1 AND source_language = $2 AND start_ms <= $3 AND end_ms >= $4
+      LIMIT 1
+    `, [context.videoId, context.sourceLanguage, fromMs, toMs]);
+    covered = windows.length > 0;
+  }
   return {
     segments: rows.map((row) => ({
       id: row.segment_id,
@@ -114,6 +134,7 @@ export async function readTranscript(
     })),
     ...(source ? { source } : {}),
     complete: rows.some((row) => row.is_complete),
+    ...(covered === undefined ? {} : { covered }),
   };
 }
 
@@ -122,12 +143,14 @@ export async function writeTranscript(
   source: string,
   segments: SubtitleSegment[],
   complete: boolean,
+  window?: { fromMs: number; toMs: number },
 ): Promise<void> {
   const sql = database(transcriptDatabaseUrl());
   if (!sql || !segments.length) return;
   await ensureTranscriptSchema(sql);
   if (complete) {
     await sql.query("DELETE FROM pxh_dubbing.pxh_transcript_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
+    await sql.query("DELETE FROM pxh_dubbing.pxh_transcript_window_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
   }
   const payload = segments.map((segment) => ({
     segmentKey: contentHash(`${segment.startMs}:${segment.sourceText}`),
@@ -158,6 +181,13 @@ export async function writeTranscript(
     end_ms: item.endMs,
     source_text: item.sourceText,
   })))]);
+  if (window) {
+    await sql.query(`
+      INSERT INTO pxh_dubbing.pxh_transcript_window_cache (video_id, source_language, start_ms, end_ms, source)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (video_id, source_language, start_ms, end_ms) DO UPDATE SET source = EXCLUDED.source, updated_at = now()
+    `, [context.videoId, context.sourceLanguage, Math.round(window.fromMs), Math.round(window.toMs), source]);
+  }
 }
 
 export async function readTranslations(

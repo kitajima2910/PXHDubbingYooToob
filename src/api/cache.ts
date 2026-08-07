@@ -15,7 +15,11 @@ const segment = z.object({
 });
 const schema = z.discriminatedUnion("action", [
   transcriptContext.extend({ action: z.literal("transcript:get"), fromMs: z.number().int().min(0).optional(), toMs: z.number().int().positive().optional() }),
-  transcriptContext.extend({ action: z.literal("transcript:put"), source: z.string().min(1).max(80), complete: z.boolean(), segments: z.array(segment).min(1).max(2_000) }),
+  transcriptContext.extend({
+    action: z.literal("transcript:put"), source: z.string().min(1).max(80), complete: z.boolean(),
+    segments: z.array(segment).max(2_000),
+    window: z.object({ fromMs: z.number().int().min(0), toMs: z.number().int().positive() }).refine((value) => value.toMs > value.fromMs).optional(),
+  }).refine((value) => value.segments.length > 0 || value.window !== undefined),
   languageContext.extend({
     action: z.literal("translations:get"), targetLanguage: z.literal("vi"),
     segments: z.array(segment.pick({ id: true, sourceText: true })).min(1).max(20),
@@ -39,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     if (data.action === "transcript:put") {
       if (!transcriptCacheConfigured()) { res.status(200).json({ enabled: false }); return; }
-      await writeTranscript(data, data.source, data.segments, data.complete);
+      await writeTranscript(data, data.source, data.segments, data.complete, data.window);
       res.status(200).json({ enabled: true });
       return;
     }

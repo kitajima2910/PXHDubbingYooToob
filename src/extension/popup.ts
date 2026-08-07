@@ -19,6 +19,10 @@ app.innerHTML = `
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
     <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
   </section>
+  <section class="api-card training-card">
+    <div class="api-heading"><div><span>PRE-TRAIN PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
+    <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="https://youtube.com/playlist?list=..."><button id="trainPlaylist" type="submit">Train</button></form>
+  </section>
   <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
@@ -85,6 +89,27 @@ defaultKeyButton.addEventListener("click", () => {
 });
 
 void renderKeyState();
+
+const trainingButton = query<HTMLButtonElement>("#trainPlaylist");
+const trainingInput = query<HTMLInputElement>("#playlistUrl");
+async function renderTrainingState(): Promise<void> {
+  const stored = await chrome.storage.local.get("playlistTraining");
+  const training = stored.playlistTraining as { running?: boolean; message?: string } | undefined;
+  query("#trainingState").textContent = training?.message ?? "Chưa chạy";
+  trainingButton.disabled = training?.running === true;
+}
+query<HTMLFormElement>("#trainingForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const url = trainingInput.value.trim();
+  if (!url) return;
+  trainingButton.disabled = true;
+  query("#trainingState").textContent = "Đang khởi tạo…";
+  void chrome.runtime.sendMessage({ action: "playlist-train", body: url }).then((response: { ok?: boolean; message?: string }) => {
+    if (!response?.ok) query("#trainingState").textContent = response?.message ?? "Train thất bại";
+  }).finally(() => { void renderTrainingState(); });
+});
+void renderTrainingState();
+window.setInterval(() => { void renderTrainingState(); }, 1_000);
 
 query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
   if (toggling || !tab?.id) return;

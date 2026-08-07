@@ -81,7 +81,7 @@ export async function loadCachedTranscript(
   fromMs?: number,
   toMs?: number,
   signal?: AbortSignal,
-): Promise<{ segments: SubtitleSegment[]; source?: string; complete: boolean } | undefined> {
+): Promise<{ segments: SubtitleSegment[]; source?: string; complete: boolean; covered?: boolean } | undefined> {
   return cachePost({ action: "transcript:get", ...cache, fromMs, toMs }, signal);
 }
 
@@ -91,6 +91,7 @@ export async function saveCachedTranscript(
   segments: SubtitleSegment[],
   complete: boolean,
   signal?: AbortSignal,
+  window?: { fromMs: number; toMs: number },
 ): Promise<void> {
-  await cachePost({ action: "transcript:put", ...cache, source, segments, complete }, signal);
+  await cachePost({ action: "transcript:put", ...cache, source, segments, complete, ...(window ? { window } : {}) }, signal);
 }
