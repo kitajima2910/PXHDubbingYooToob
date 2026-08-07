@@ -137,7 +137,7 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
   }
 }
 
-async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>, onFirstAudio: () => void): Promise<number> {
+async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
   const upcoming = selectUpcomingSegments(segments, fromMs, 45_000, queued);
   for (const item of upcoming) queued.add(item.id);
@@ -158,9 +158,7 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
     const prepare = async (segment: SubtitleSegment): Promise<void> => {
       try {
         await addPreparedSpeech(segment, signal);
-        const isFirstAudio = state.processedSegments === 0;
         update({ processedSegments: state.processedSegments + 1 });
-        if (isFirstAudio) onFirstAudio();
       } catch (error) {
         for (const source of batch) {
           if (source.startMs >= segment.startMs && source.startMs < segment.endMs) queued.delete(source.id);
@@ -294,7 +292,7 @@ async function bufferContinuously(
   while (!signal.aborted) {
     try {
       const fromMs = Math.max(0, Math.round(video.currentTime * 1000));
-      const prepared = await buildWindow(segments, video, signal, queued, () => undefined);
+      const prepared = await buildWindow(segments, video, signal, queued);
       if (!signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
       if (prepared > 0) { await wait(250, signal); continue; }
       await wait(4_000, signal);
@@ -369,22 +367,15 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     update({ source: captions.source.startsWith("Neon cache") ? captions.source : "Transcript — đồng bộ" });
     scheduler.start();
     const queued = new Set<string>();
-    let markFirstAudio!: () => void;
-    const firstAudio = new Promise<void>((resolve) => { markFirstAudio = resolve; });
-    const completion = buildWindow(captions.segments, video, sessionController.signal, queued, markFirstAudio);
-    const completedBeforeAudio = await Promise.race([firstAudio.then(() => false), completion.then(() => true)]);
-    if (completedBeforeAudio && state.processedSegments === 0) {
+    await buildWindow(captions.segments, video, sessionController.signal, queued);
+    if (state.processedSegments === 0) {
       update({ status: "ready", message: "Chưa có bản dịch cache — đang tiếp tục theo dõi" });
     }
     if (resumeWhenReady && !sessionController.signal.aborted) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
-    void completion.then(() => {
-      if (controller === sessionController && !sessionController.signal.aborted) {
-        update({ status: "ready", message: "Sẵn sàng" });
-        void bufferContinuously(video, currentVideoId, captions.segments, useBackend, sessionController.signal, queued);
-      }
-    })
-      .catch((error: unknown) => { if (controller === sessionController && !sessionController.signal.aborted) fail(error instanceof Error ? error.message : "Không thể tạo bộ đệm"); });
+    if (!sessionController.signal.aborted) {
+      void bufferContinuously(video, currentVideoId, captions.segments, useBackend, sessionController.signal, queued);
+    }
   } catch (error) {
     if (resumeWhenReady && video.paused) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) fail(error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng");

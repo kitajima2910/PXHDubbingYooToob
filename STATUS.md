@@ -171,3 +171,12 @@ Bước 1–2 — `Transcript DOM/Groq Whisper → cache Neon → dịch tiếng
 - File sửa: `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/popup.ts`, `src/shared/segments.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`, `STATUS.md`.
 - Kiểm tra: `npm run check` đạt; 27/27 test đạt; production build đạt và guard xác nhận `content.js` standalone. Smoke test thật tạo được 18.720 byte audio bằng `vi-VN-NamMinhNeural`.
 - Còn lại: chưa có nhận dạng nhiều người nói/gán nhiều giọng và chưa tách giọng nói khỏi nhạc nền như tính năng thành viên của youtube-dubbing.com; cần model diarization/source separation riêng nếu muốn đạt đúng mức đó. Chưa chạy E2E trực tiếp trong Brave với extension vừa reload.
+
+## Sửa bỏ qua đoạn sau Smooth v1 — 2026-08-07
+
+- Nguyên nhân gốc: cửa sổ bắt đầu câu 0,8–2,5 giây quá ngắn so với thời gian tải MP3 Nam Minh; video còn được chạy ngay khi câu đầu sẵn sàng trong lúc các câu còn lại của batch đang tải. Một câu dài chạy quá slot cũng giữ scheduler bận và làm câu kế tiếp bị đánh dấu hết hạn.
+- Scheduler nay cho phép bắt đầu câu trong toàn bộ slot còn hiệu lực, chỉ đánh dấu hết hạn khi timeline câu thực sự kết thúc, tính playback rate theo phần thời gian còn lại và chỉ dừng audio vượt `endMs` khi câu kế tiếp đã có audio sẵn sàng; nếu chưa có thì câu hiện tại vẫn được nói hết.
+- Batch đầu tiên được tạo đầy đủ trong lúc video tạm dừng; chỉ sau khi toàn batch đã có audio video mới tiếp tục. Bộ đệm các batch sau vẫn chạy song song như trước.
+- File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`, `tests/scheduler.test.ts`, `STATUS.md`.
+- Kiểm tra: `npm run check` đạt; 27/27 test đạt; production build đạt và `content.js` vẫn standalone.
+- Giới hạn còn lại: câu không có trong Translation Memory mà cả Groq lẫn dịch offline đều không tạo được bản dịch vẫn không thể phát tiếng Việt; trường hợp này khác với scheduler bỏ nhầm audio đã chuẩn bị.

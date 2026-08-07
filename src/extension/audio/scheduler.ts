@@ -1,8 +1,6 @@
 import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
-const MAX_START_LATENESS_MS = 2_500;
-const MIN_START_LATENESS_MS = 800;
 const MIN_SMOOTH_RATE = 0.95;
 const MAX_SMOOTH_RATE = 1.25;
 const MAX_PLAYBACK_RATE = 1.35;
@@ -20,13 +18,7 @@ export function speechCatchupRate(latenessMs: number): number {
 }
 
 export function canStartSpeechAt(segment: SubtitleSegment, timelineMs: number): boolean {
-  const slotDurationMs = Math.max(500, segment.endMs - segment.startMs);
-  const allowedLatenessMs = Math.min(
-    MAX_START_LATENESS_MS,
-    Math.max(MIN_START_LATENESS_MS, slotDurationMs * 0.45),
-  );
   return timelineMs >= segment.startMs
-    && timelineMs - segment.startMs <= allowedLatenessMs
     && timelineMs < segment.endMs - 250;
 }
 
@@ -73,10 +65,14 @@ export class AudioScheduler {
     const tick = (): void => {
       const now = this.video.currentTime * 1000;
       for (const { segment } of this.items.values()) {
-        if (!this.played.has(segment.id) && now >= segment.startMs && !canStartSpeechAt(segment, now)) {
+        if (!this.played.has(segment.id) && now >= segment.endMs - 250) {
           this.played.add(segment.id);
         }
       }
+      const activeSegment = this.active ? this.items.get(this.active.id)?.segment : undefined;
+      const replacementReady = [...this.items.values()].some(({ segment }) =>
+        segment.id !== activeSegment?.id && !this.played.has(segment.id) && canStartSpeechAt(segment, now));
+      if (activeSegment && now >= activeSegment.endMs && replacementReady) this.stopActive();
       const match = !this.active ? [...this.items.values()]
         .filter(({ segment }) => canStartSpeechAt(segment, now)
           && !this.played.has(segment.id))
@@ -94,10 +90,11 @@ export class AudioScheduler {
     this.played.add(item.segment.id);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
     const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
+    const remainingSlotDuration = Math.max(500, item.segment.endMs - this.video.currentTime * 1000);
     const catchupRate = speechCatchupRate(latenessMs);
     if (item.text !== undefined) {
       const estimatedDuration = Math.max(0.8, item.text.length / 14);
-      const rate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(estimatedDuration, slotDuration, this.video.playbackRate) * catchupRate);
+      const rate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(estimatedDuration, remainingSlotDuration, this.video.playbackRate) * catchupRate);
       this.active = { id: item.segment.id, chromeTts: true };
       void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(async (result: { ok?: boolean; message?: string }) => {
         if (this.active?.id !== item.segment.id) return;
@@ -127,7 +124,8 @@ export class AudioScheduler {
     audio.dataset.catchupRate = String(catchupRate);
     audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(0, slotDuration, this.video.playbackRate) * catchupRate);
     audio.addEventListener("loadedmetadata", () => {
-      const baseRate = speechPlaybackRate(audio.duration, slotDuration, 1);
+      const remainingMs = Math.max(500, item.segment.endMs - this.video.currentTime * 1000);
+      const baseRate = speechPlaybackRate(audio.duration, remainingMs, 1);
       audio.dataset.baseRate = String(baseRate);
       audio.playbackRate = Math.min(MAX_PLAYBACK_RATE, Math.max(0.85, baseRate * this.video.playbackRate * catchupRate));
     }, { once: true });

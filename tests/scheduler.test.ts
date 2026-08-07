@@ -11,10 +11,10 @@ describe("tốc độ phát giọng nói", () => {
     expect(speechCatchupRate(20_000)).toBe(1.1);
   });
 
-  it("bỏ câu đã trễ thay vì đọc backlog lệch hình", () => {
+  it("vẫn phát câu đến muộn khi slot của câu chưa kết thúc", () => {
     const segment = { id: "a", startMs: 10_000, endMs: 16_000, sourceText: "Xin chào" };
     expect(canStartSpeechAt(segment, 12_000)).toBe(true);
-    expect(canStartSpeechAt(segment, 13_000)).toBe(false);
+    expect(canStartSpeechAt(segment, 13_000)).toBe(true);
     expect(canStartSpeechAt(segment, 15_900)).toBe(false);
   });
 });
