@@ -8,10 +8,28 @@ export function stripTranscriptTimestamps(text: string, knownTimestamp = ""): st
     cleaned = cleaned.replace(new RegExp(escaped, "g"), " ");
   }
   return cleaned
-    .replace(/^\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=\p{L})/u, "")
-    .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
+    .replace(/(^|[^\d])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?!\d)/gu, "$1")
+    .replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
     .trim();
+}
+
+function joinWithoutRepeatedBoundary(parts: string[]): string {
+  const output: string[] = [];
+  const normalized = (value: string): string => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  for (const part of parts) {
+    const words = part.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) continue;
+    let overlap = 0;
+    for (let size = Math.min(12, output.length, words.length); size >= 2; size -= 1) {
+      const tail = output.slice(-size).map(normalized);
+      const head = words.slice(0, size).map(normalized);
+      if (tail.every((word, index) => word && word === head[index])) { overlap = size; break; }
+    }
+    output.push(...words.slice(overlap));
+  }
+  return output.join(" ");
 }
 
 export function batchSegments(segments: SubtitleSegment[], size = 8): SubtitleSegment[][] {
@@ -46,7 +64,7 @@ export function mergeOverlappingSegments(segments: SubtitleSegment[], targetSpan
       id: `merged-${first.id}-${last.id}`,
       startMs: first.startMs,
       endMs,
-      sourceText: group.map((item) => item.sourceText.trim()).filter(Boolean).join(" ").replace(/\s+/g, " "),
+      sourceText: joinWithoutRepeatedBoundary(group.map((item) => item.sourceText)),
     });
     group = [];
   };

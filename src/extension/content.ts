@@ -1,6 +1,6 @@
 import type { ExtensionState, SubtitleSegment } from "../shared/types";
 import { batchSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../shared/segments";
-import { createSpeech, loadBackendCaptions, transcribeAudio, translateSegments } from "./api/client";
+import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTranscript, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
 
@@ -27,6 +27,10 @@ function takePendingWhisperChunk(): WhisperChunk | undefined {
 
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
 function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
+function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
+function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
+  return translateSegments(segments, signal, cacheContext());
+}
 
 function speechFingerprint(text: string): string {
   return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi")
@@ -78,7 +82,7 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
     if (signal.aborted) return 0;
     update({ status: "translating", message: "Đang dịch" });
     let translated: SubtitleSegment[];
-    try { translated = await translateSegments(batch, signal); }
+    try { translated = await translateForVideo(batch, signal); }
     catch (error) { for (const item of batch) queued.delete(item.id); throw error; }
     update({ status: "speaking", message: state.processedSegments ? "Đang tạo bộ đệm" : "Đang tạo giọng nói" });
     let nextIndex = 0;
@@ -102,11 +106,17 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   const video = document.querySelector<HTMLVideoElement>("video");
   if (!video || signal.aborted || !whisperMode) return;
   update({ status: "loading", message: "Đang nhận dạng giọng nói" });
-  const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
-  if (signal.aborted) return;
-  const vietnameseFeedback = /^(?:vi|vie|vietnamese|tiếng việt)$/i.test(result.language?.trim() ?? "")
-    && recentDubbingTexts.length > 0;
-  const sourceSegments = vietnameseFeedback ? [] : result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+  const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
+  const cached = await loadCachedTranscript(cacheContext(), capturedStartMs, chunk.capturedEndMs, signal);
+  let sourceSegments = cached?.segments ?? [];
+  const fromCache = sourceSegments.length > 0;
+  if (!fromCache) {
+    const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
+    if (signal.aborted) return;
+    const vietnameseFeedback = /^(?:vi|vie|vietnamese|tiếng việt)$/i.test(result.language?.trim() ?? "")
+      && recentDubbingTexts.length > 0;
+    sourceSegments = vietnameseFeedback ? [] : result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+  }
   if (!sourceSegments.length) {
     update({ status: "ready", message: "Đang nghe video" });
     if (resumeAfterWhisperWarmup) {
@@ -116,17 +126,27 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     return;
   }
   const chunkId = whisperChunkIndex++;
-  const capturedStartMs = chunk.capturedEndMs - chunk.durationMs;
   const desiredStartMs = capturedStartMs + whisperDelaySeconds * 1000;
   const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
-  const segments = sourceSegments.map((segment, index) => ({
-    ...segment,
-    id: `whisper-${chunkId}-${index}`,
+  const segments = fromCache ? sourceSegments.map((segment, index) => ({
+    ...segment, id: `cache-${chunkId}-${index}`,
+    startMs: Math.max(anchorMs, segment.startMs + whisperDelaySeconds * 1000),
+    endMs: Math.max(anchorMs + 500, segment.endMs + whisperDelaySeconds * 1000),
+  })) : sourceSegments.map((segment, index) => ({
+    ...segment, id: `whisper-${chunkId}-${index}`,
     startMs: anchorMs + segment.startMs,
     endMs: anchorMs + Math.max(segment.startMs + 500, segment.endMs),
   }));
+  if (!fromCache) {
+    const transcriptSegments = segments.map((segment) => ({
+      ...segment,
+      startMs: segment.startMs - whisperDelaySeconds * 1000,
+      endMs: segment.endMs - whisperDelaySeconds * 1000,
+    }));
+    await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal);
+  }
   update({ status: "translating", message: "Đang dịch giọng nói" });
-  const translated = await translateSegments(segments, signal);
+  const translated = await translateForVideo(segments, signal);
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   await Promise.all(translated.map(async (segment) => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
@@ -189,7 +209,11 @@ async function bufferContinuously(
       if (prepared > 0) { await wait(250, signal); continue; }
       await wait(4_000, signal);
       if (signal.aborted) return;
-      if (useBackend) segments = (await loadBackendCaptions(sessionVideoId, fromMs, fromMs + 60_000, signal)).segments;
+      if (useBackend) {
+        const loaded = await loadBackendCaptions(sessionVideoId, fromMs, fromMs + 60_000, signal);
+        segments = loaded.segments;
+        void saveCachedTranscript(cacheContext(), loaded.source, loaded.segments, false).catch(() => undefined);
+      }
     } catch (error) {
       if (!signal.aborted) {
         update({ status: "ready", message: "Đang tạo bộ đệm" });
@@ -219,25 +243,40 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   try {
     let captions: { segments: SubtitleSegment[]; source: string };
     let useBackend = false;
-    try { captions = await loadYouTubeCaptions(); }
+    let completeTranscript = false;
+    try {
+      captions = await loadYouTubeCaptions();
+      completeTranscript = true;
+      void saveCachedTranscript(cacheContext(), captions.source, captions.segments, true).catch(() => undefined);
+    }
     catch (bridgeError) {
       useBackend = true;
       try {
         captions = await loadBackendCaptions(currentVideoId, Math.round(video.currentTime * 1000), Math.round(video.currentTime * 1000) + 60_000, sessionController.signal);
       } catch (backendError) {
-        // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
-        await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
-        scheduler.start();
-        console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError);
-        whisperMode = true;
-        update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
-        await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
-        if (resumeWhenReady) void video.play().catch(() => undefined);
-        return state;
+        const cached = await loadCachedTranscript(cacheContext(), undefined, undefined, sessionController.signal);
+        if (cached?.complete && cached.segments.length) {
+          captions = { segments: cached.segments, source: "Neon cache — đồng bộ" };
+          useBackend = false;
+          completeTranscript = true;
+        } else {
+          // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
+          await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
+          scheduler.start();
+          console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError);
+          whisperMode = true;
+          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
+          await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+          if (resumeWhenReady) void video.play().catch(() => undefined);
+          return state;
+        }
       }
     }
+    if (!completeTranscript && captions.segments.length) {
+      void saveCachedTranscript(cacheContext(), captions.source, captions.segments, false).catch(() => undefined);
+    }
     void chrome.runtime.sendMessage({ action: "capture-stop" });
-    update({ source: "Transcript — đồng bộ" });
+    update({ source: captions.source.startsWith("Neon cache") ? captions.source : "Transcript — đồng bộ" });
     scheduler.start();
     const queued = new Set<string>();
     let markFirstAudio!: () => void;

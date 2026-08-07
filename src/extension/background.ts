@@ -1,7 +1,7 @@
 import { YoutubeTranscript } from "youtube-transcript";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe"]);
+const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
 const requests = new Map<string, AbortController>();
 
 async function ensureOffscreenDocument(): Promise<void> {

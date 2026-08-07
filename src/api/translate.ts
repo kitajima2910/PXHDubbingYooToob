@@ -17,7 +17,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const provider = new GroqTranslationProvider();
     const segments = await retry((signal) => provider.translate(input.data.segments, signal));
     const expected = new Set(input.data.segments.map((item) => item.id));
-    if (segments.some((item) => !expected.has(item.id) || !item.translatedText)) throw new Error("Ánh xạ bản dịch không hợp lệ");
+    const returned = new Set(segments.map((item) => item.id));
+    if (segments.length !== input.data.segments.length || returned.size !== segments.length
+      || segments.some((item) => !expected.has(item.id) || !item.translatedText)) {
+      throw new Error("Ánh xạ bản dịch không đầy đủ");
+    }
     res.status(200).json({ segments });
   } catch (error) {
     console.error("Dịch thất bại", error instanceof Error ? error.message : "Lỗi không xác định");

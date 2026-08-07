@@ -1,7 +1,7 @@
 import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
-const MAX_START_LATENESS_MS = 12_000;
+const MAX_START_LATENESS_MS = 20_000;
 const MIN_SMOOTH_RATE = 0.95;
 const MAX_SMOOTH_RATE = 1.25;
 const MAX_PLAYBACK_RATE = 1.35;
@@ -12,6 +12,10 @@ export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs:
     : audioDurationSeconds / Math.max(0.5, slotDurationMs / 1000);
   const smoothRate = Math.min(MAX_SMOOTH_RATE, Math.max(MIN_SMOOTH_RATE, naturalRate));
   return Math.min(1.3, Math.max(0.85, smoothRate * videoRate));
+}
+
+export function speechCatchupRate(latenessMs: number): number {
+  return 1 + Math.min(0.1, Math.max(0, latenessMs) / 40_000);
 }
 
 export class AudioScheduler {
@@ -69,9 +73,11 @@ export class AudioScheduler {
     // At-most-once trong một timeline: nếu play/resume lỗi, tick sau không được phát lại từ đầu.
     this.played.add(item.segment.id);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
+    const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
+    const catchupRate = speechCatchupRate(latenessMs);
     if (item.text !== undefined) {
       const estimatedDuration = Math.max(0.8, item.text.length / 14);
-      const rate = speechPlaybackRate(estimatedDuration, slotDuration, this.video.playbackRate);
+      const rate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(estimatedDuration, slotDuration, this.video.playbackRate) * catchupRate);
       this.active = { id: item.segment.id, chromeTts: true };
       void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(() => {
         if (this.active?.id === item.segment.id) this.finishActive();
@@ -82,8 +88,6 @@ export class AudioScheduler {
     }
     if (!item.url) return;
     const audio = new Audio(item.url);
-    const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
-    const catchupRate = 1 + Math.min(0.1, latenessMs / 40_000);
     audio.preload = "auto";
     audio.volume = 1;
     audio.dataset.baseRate = "1";

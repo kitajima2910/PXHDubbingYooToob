@@ -10,6 +10,11 @@
 - Quota: ưu tiên Groq key riêng nếu người dùng đã lưu; nếu không thì dùng key mặc định có giới hạn. Không xoay vòng nhiều key free.
 - Verify sau khi hoàn thành: `npm run check`, toàn bộ test, production build và test Chrome end-to-end cho cả video có transcript lẫn video không có transcript.
 
+> Thực hiện kế hoạch 2026-08-08: lọc timestamp ở mọi vị trí kể cả khi dính liền chữ, loại phần từ lặp tại ranh giới caption chồng lấn, yêu cầu Groq trả đủ/đúng ID và cho Chrome TTS catch-up tối đa 10% khi bắt đầu muộn; cửa sổ nhận câu muộn tăng 12 → 20 giây. Giữ nguyên Transcript DOM, FIFO Whisper, chống audio feedback và scheduler at-most-once đang hoạt động.
+> Cache Neon 2026-08-08: thêm `/api/cache`, driver HTTP `@neondatabase/serverless` và `migrations/001_neon_cache.sql`. Transcript lưu theo `videoId`/ngôn ngữ/timeline; bản dịch lưu theo `videoId`/ngôn ngữ nguồn-đích/hash nội dung. Transcript đầy đủ và từng chunk Whisper đều được tái dùng; dịch chỉ gửi cache miss sang Groq. Cache tự bỏ qua khi thiếu `DATABASE_URL` và tự tạo schema ở lần dùng đầu.
+> File đã sửa/thêm: `.env.example`, `README.md`, `package.json`, `package-lock.json`, `scripts/local-api.ts`, `api/cache.ts`, `migrations/001_neon_cache.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/api/translate.ts`, `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/youtube/page-bridge.ts`, `src/shared/segments.ts`, `tests/cache.test.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`.
+> Verify kế hoạch 2026-08-08: `npm run check` đạt, 14/14 test đạt và production build đạt. Chưa smoke-test Neon thật vì `.env.local` chưa có `DATABASE_URL`. Chrome end-to-end chưa chạy được vì máy hiện không có thư mục profile Google Chrome/kênh kết nối Chrome; cần kiểm thử tương tác cho video có và không có transcript trên máy đã nạp extension.
+
 > Loại bỏ provider realtime cũ 2026-08-07: video không có transcript chuyển thẳng sang Groq Whisper theo chunk 5 giây. Đã gỡ endpoint cấp token, WebSocket/PCM offscreen, message bridge, trạng thái content, host permission, biến môi trường, test và nội dung UI/tài liệu liên quan. Các file đã sửa: `.env.example`, `README.md`, `public/manifest.json`, `scripts/local-api.ts`, `src/extension/api/client.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/offscreen.ts`, `src/extension/popup.ts`; đồng thời xóa ba file endpoint/token và test tương ứng.
 > Verify loại bỏ provider realtime cũ: quét toàn repository không còn tham chiếu; `npm run check`, 9/9 test và production build đều đạt. Chưa kiểm thử phát âm thanh tương tác trong Chrome; cần reload extension từ `dist` và thử video không có transcript.
 
@@ -56,11 +61,11 @@
 > Lọc mọi token timestamp nằm ở bất kỳ vị trí nào trong transcript (không chỉ đầu câu), lọc lại lần hai trước dịch/TTS, và tự đóng/ẩn panel Bản chép lời ngay sau khi đã đọc dữ liệu DOM.
 > Video `36CVX2eefuI` được YouTube xác nhận transcript bị tắt; chuẩn hóa lỗi fallback thành thông báo tiếng Việt nêu rõ cần Whisper. Đây không phải lỗi Vercel và không thể lấy bằng các API caption hiện tại.
 
-Cập nhật: 2026-08-06
+Cập nhật: 2026-08-07
 
 ## TARGET hiện tại
 
-Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS → phát đồng bộ`.
+Bước 1–2 — `Transcript DOM/Groq Whisper → cache Neon → dịch tiếng Việt → Chrome TTS → phát đồng bộ`.
 
 ## Đã hoàn thành
 
@@ -86,11 +91,13 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 - Có server `npm run dev:api` để kiểm thử local mà không cần đăng nhập Vercel.
 - Server local ghi phương thức, endpoint, mã trạng thái và thời gian xử lý; không ghi payload hay API key.
 - Không chứa API key hay chuỗi kết nối trong extension/repository.
+- Cache transcript/bản dịch bằng Neon theo `videoId` và ngôn ngữ; có migration, tự tạo schema và fallback an toàn khi chưa cấu hình database.
+- Lọc timestamp không phụ thuộc khoảng trắng; chống lặp từ ở caption chồng lấn và catch-up cho cả Chrome TTS lẫn MP3.
 
 ## Xác minh
 
 - `npm run check`: đạt.
-- `npm test`: đạt, 8 test.
+- `npm test`: đạt, 14 test.
 - `npm run build`: đạt; tạo `dist/manifest.json`, popup và content script.
 - `.env.local` có `GROQ_API_KEY` và được xác minh bị Git bỏ qua.
 - Smoke test dịch vụ thật: Groq kết nối thành công; Edge TTS `vi-VN-HoaiMyNeural` tạo MP3 thành công (14.688 byte).
@@ -100,7 +107,6 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 
 ## Chưa làm
 
-- Bước 2: cache transcript/bản dịch bằng Neon và migration.
 - Bước 3: cache audio bằng IndexedDB.
 - Bước 4 mở rộng: bộ đệm liên tục 30–60 giây và hủy/tải lại chính xác sau seek.
 - Bước 5 mở rộng: tối ưu overlap/chống trùng ở ranh giới audio chunk và đồng bộ Whisper chính xác hơn cho video tốc độ cao.
@@ -110,13 +116,14 @@ Bước 1 — `Phụ đề YouTube → dịch tiếng Việt → Hoài My TTS �
 ## Giới hạn/rủi ro
 
 - Parser phụ thuộc cấu trúc trang YouTube hiện tại.
-- Cửa sổ Bước 1 tối đa 40 câu và chưa tự nạp tiếp.
+- Cache Neon chưa được smoke-test với database thật do môi trường local chưa có `DATABASE_URL`.
+- `npm install` báo 10 advisory trong cây dependency hiện tại (3 moderate, 7 high); chưa chạy `npm audit fix` vì TARGET không yêu cầu nâng cấp dependency và có nguy cơ thay đổi hành vi.
 - Rate limit in-memory không dùng chung giữa các Vercel instance.
 - `msedge-tts` là client không chính thức; cần provider dự phòng trước production.
 - `.env.example` đã được xác minh không chứa khóa; khóa Groq nằm trong `.env.local` đã bị Git bỏ qua.
 - Kiểm tra playback rate: đồng bộ hiện tại theo kịp khoảng 0.5x–1.25x; từ 1.5x trở lên audio bị giới hạn 1.3x nên có thể trễ và phải resync/bỏ cụm. Ở 0.5x–0.75x giọng bị giới hạn tối thiểu 0.85x nên sẽ có khoảng nghỉ giữa các cụm.
 - Backend có thể deploy thành Vercel Functions và extension có thể build trỏ thẳng tới production URL, nhưng chưa production-ready cho phát hành công khai: rate limit còn in-memory, chưa có quota/xác thực người dùng và CORS/extension origin không ngăn client giả mạo gọi API trực tiếp.
-- Production API calls được chuyển từ content script sang extension service worker theo hướng dẫn Chrome, với allowlist ba endpoint và hủy request; `.env.production` cố định public Vercel URL và Manifest chỉ cấp quyền cho đúng domain production.
+- Production API calls được chuyển từ content script sang extension service worker theo hướng dẫn Chrome, với allowlist endpoint và hủy request; `.env.production` cố định public Vercel URL và Manifest chỉ cấp quyền cho đúng domain production.
 - Kiểm tra production với extension ID phát triển: CORS đạt, translate/TTS trả 200; transcript trên Vercel trả 502 do phía YouTube/datacenter. Fallback transcript vì vậy chạy trong service worker bằng IP người xem, vẫn chỉ nhận `videoId` hợp lệ; Vercel giữ dịch và TTS.
 - Service worker tự phát hiện transcript timestamp theo giây hay milliseconds bằng median duration, chuẩn hóa trước khi lọc cửa sổ và thử đơn vị còn lại nếu vùng kết quả rỗng.
 > Xác minh UI/đồng bộ mới nhất: rút ngắn timeout bridge 20 → 12 giây, thời gian chờ player response 5 → 2 giây và chờ transcript UI 7 → 3,5 giây; `npm run check`, 8/8 test và production build đều đạt.

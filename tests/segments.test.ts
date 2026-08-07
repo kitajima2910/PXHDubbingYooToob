@@ -43,5 +43,15 @@ describe("xử lý đoạn phụ đề", () => {
     expect(stripTranscriptTimestamps("Text 1：02 tiếp theo")).toBe("Text tiếp theo");
     expect(stripTranscriptTimestamps("0:42", "0:42")).toBe("");
     expect(stripTranscriptTimestamps("0:19Nội dung tiếp theo", "0:19")).toBe("Nội dung tiếp theo");
+    expect(stripTranscriptTimestamps("Mở đầu0:42Nội dung tiếp theo")).toBe("Mở đầuNội dung tiếp theo");
+    expect(stripTranscriptTimestamps("Text (1：02), rồi 2.03 kết thúc")).toBe("Text, rồi kết thúc");
+  });
+
+  it("loại phần từ bị lặp ở ranh giới caption chồng lấn", () => {
+    const result = mergeOverlappingSegments([
+      { id: "a", startMs: 0, endMs: 4_000, sourceText: "This is how it works today" },
+      { id: "b", startMs: 3_000, endMs: 7_000, sourceText: "it works today in practice." },
+    ]);
+    expect(result[0]?.sourceText).toBe("This is how it works today in practice.");
   });
 });

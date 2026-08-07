@@ -116,9 +116,10 @@ function stripTranscriptTimestamps(text: string, knownTimestamp = ""): string {
     cleaned = cleaned.replace(new RegExp(escaped, "g"), " ");
   }
   return cleaned
-    .replace(/^\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=\p{L})/u, "")
-    .replace(/(^|[\s([{"'“])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?=$|[\s)\]}"'”!?;,])/g, "$1")
+    .replace(/(^|[^\d])\d{1,3}(?:(?::|：|\.)\d{2}){1,2}(?!\d)/gu, "$1")
+    .replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
     .trim();
 }
 
