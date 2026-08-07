@@ -373,6 +373,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; startMs?: number }, _sender, respond) => {
+  if (request.action === "training-ready") { respond({ ok: true, videoId: videoId() }); return; }
   if (request.action === "status") { respond(state); return; }
   if (request.action === "training-playback-start") {
     const video = document.querySelector<HTMLVideoElement>("video");

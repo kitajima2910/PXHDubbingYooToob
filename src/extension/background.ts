@@ -97,6 +97,20 @@ async function playlistVideoIds(value: string): Promise<string[]> {
   return unique;
 }
 
+async function waitForTrainingContent(tabId: number, videoId: string, signal: AbortSignal): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+    try {
+      const ready = await chrome.tabs.sendMessage(tabId, { action: "training-ready" }) as { ok?: boolean; videoId?: string };
+      if (ready?.ok && ready.videoId === videoId) return;
+    } catch (error) { lastError = error; }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
+  throw new Error(`Content script trainer chưa sẵn sàng sau 15 giây${detail}`);
+}
+
 async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Promise<BackgroundSegment[]> {
   const trainingUrl = `https://www.youtube.com/watch?v=${videoId}&autoplay=0`;
   let tab: chrome.tabs.Tab;
@@ -127,6 +141,7 @@ async function loadTrainingTranscript(videoId: string, signal: AbortSignal): Pro
       }, { once: true });
   });
   if (signal.aborted) throw new DOMException("Job train đã dừng", "AbortError");
+  await waitForTrainingContent(tab.id, videoId, signal);
   const response = await chrome.tabs.sendMessage(tab.id, { action: "training-transcript" }) as { segments?: BackgroundSegment[]; message?: string };
   if (!response?.segments?.length) throw new Error(response?.message ?? "Transcript rỗng");
   return response.segments;
