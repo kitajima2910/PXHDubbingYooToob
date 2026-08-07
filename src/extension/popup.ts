@@ -21,8 +21,8 @@ app.innerHTML = `
     <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
   </section>
   <section class="api-card training-card">
-    <div class="api-heading"><div><span>PRE-TRAIN PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
-    <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="https://youtube.com/playlist?list=..."><button id="trainPlaylist" type="submit">Train</button></form>
+    <div class="api-heading"><div><span>PRE-TRAIN VIDEO / PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
+    <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="Dán URL video hoặc playlist YouTube"><button id="trainPlaylist" type="submit">Train</button></form>
     <button id="resetTraining" class="stop-training" type="button" hidden>Dừng Train</button>
   </section>
   <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
@@ -96,6 +96,12 @@ void renderKeyState();
 const trainingButton = query<HTMLButtonElement>("#trainPlaylist");
 const trainingInput = query<HTMLInputElement>("#playlistUrl");
 const resetTrainingButton = query<HTMLButtonElement>("#resetTraining");
+void chrome.storage.local.get("playlistTrainingUrl").then(({ playlistTrainingUrl }) => {
+  if (!trainingInput.value && typeof playlistTrainingUrl === "string") trainingInput.value = playlistTrainingUrl;
+});
+trainingInput.addEventListener("input", () => {
+  void chrome.storage.local.set({ playlistTrainingUrl: trainingInput.value });
+});
 resetTrainingButton.addEventListener("click", () => {
   void chrome.runtime.sendMessage({ action: "playlist-train-reset" }).then(() => renderTrainingState());
 });
@@ -111,6 +117,7 @@ query<HTMLFormElement>("#trainingForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const url = trainingInput.value.trim();
   if (!url) return;
+  void chrome.storage.local.set({ playlistTrainingUrl: url });
   trainingButton.disabled = true;
   query("#trainingState").textContent = "Đang khởi tạo…";
   void chrome.runtime.sendMessage({ action: "playlist-train", body: url }).then((response: { ok?: boolean; message?: string }) => {

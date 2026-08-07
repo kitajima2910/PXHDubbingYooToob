@@ -1,4 +1,5 @@
 import { YoutubeTranscript } from "youtube-transcript";
+import { parseYouTubeTrainingTarget } from "./training/youtube-url";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
@@ -53,13 +54,13 @@ async function translateTrainingBatch(body: unknown, signal: AbortSignal): Promi
 }
 
 async function playlistVideoIds(value: string): Promise<string[]> {
-  const url = new URL(value);
-  if (!/(^|\.)youtube\.com$/.test(url.hostname) || !url.searchParams.get("list")) throw new Error("URL playlist YouTube không hợp lệ");
-  const response = await fetch(url.toString());
+  const target = parseYouTubeTrainingTarget(value);
+  if (target.kind === "video") return target.videoIds;
+  const response = await fetch(target.url);
   if (!response.ok) throw new Error(`YouTube trả lỗi ${response.status}`);
   const html = await response.text();
   const ids = [...html.matchAll(/"videoId":"([A-Za-z0-9_-]{11})"/g)].map((match) => match[1]!);
-  const current = url.searchParams.get("v");
+  const current = new URL(target.url).searchParams.get("v");
   if (current && /^[A-Za-z0-9_-]{11}$/.test(current)) ids.unshift(current);
   const unique = [...new Set(ids)].slice(0, 100);
   if (!unique.length) throw new Error("Không tìm thấy video công khai trong playlist");
@@ -117,7 +118,7 @@ async function notifyTraining(title: string, message: string): Promise<void> {
 async function trainPlaylist(value: string, signal: AbortSignal): Promise<PlaylistTrainingResult> {
   const videoIds = await playlistVideoIds(value);
   const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0 };
-  await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc playlist" } });
+  await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc video/playlist" } });
   for (const [videoIndex, videoId] of videoIds.entries()) {
     if (playlistTrainingCancelled) throw new Error("Job train đã được hủy");
     try {
@@ -162,9 +163,9 @@ function startPlaylistTraining(value: string): void {
   playlistTrainingCancelled = false;
   playlistTrainingController = new AbortController();
   const signal = playlistTrainingController.signal;
-  playlistTrainingJob = chrome.storage.local.set({ playlistTraining: { running: true, message: "Đang khởi tạo playlist" } })
+  playlistTrainingJob = chrome.storage.local.set({ playlistTraining: { running: true, message: "Đang khởi tạo video/playlist" } })
     .then(() => trainPlaylist(value, signal)).then(() => undefined, async (error: unknown) => {
-    const message = error instanceof Error ? error.message : "Không thể train playlist";
+    const message = error instanceof Error ? error.message : "Không thể train video/playlist";
     if (signal.aborted) {
       await chrome.storage.local.set({ playlistTraining: { running: false, message: "Đã dừng Train" } });
       return;
