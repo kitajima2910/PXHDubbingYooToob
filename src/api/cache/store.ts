@@ -146,7 +146,7 @@ export async function writeTranscript(
   window?: { fromMs: number; toMs: number },
 ): Promise<void> {
   const sql = database(transcriptDatabaseUrl());
-  if (!sql || !segments.length) return;
+  if (!sql || (!segments.length && !window)) return;
   await ensureTranscriptSchema(sql);
   if (complete) {
     await sql.query("DELETE FROM pxh_dubbing.pxh_transcript_cache WHERE video_id = $1 AND source_language = $2", [context.videoId, context.sourceLanguage]);
