@@ -26,7 +26,11 @@ export class AudioScheduler {
   private originalVolume: number;
   private lastTimelineMs: number;
 
-  constructor(private readonly video: HTMLVideoElement, private sourceVolume: number) {
+  constructor(
+    private readonly video: HTMLVideoElement,
+    private sourceVolume: number,
+    private readonly createFallbackSpeech?: (segment: SubtitleSegment, text: string) => Promise<Blob>,
+  ) {
     this.originalVolume = video.volume;
     this.lastTimelineMs = video.currentTime * 1000;
     video.addEventListener("pause", this.onPause);
@@ -79,11 +83,24 @@ export class AudioScheduler {
       const estimatedDuration = Math.max(0.8, item.text.length / 14);
       const rate = Math.min(MAX_PLAYBACK_RATE, speechPlaybackRate(estimatedDuration, slotDuration, this.video.playbackRate) * catchupRate);
       this.active = { id: item.segment.id, chromeTts: true };
-      void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(() => {
-        if (this.active?.id === item.segment.id) this.finishActive();
-      }, () => {
-        if (this.active?.id === item.segment.id) this.stopActive();
-      });
+      void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(async (result: { ok?: boolean; message?: string }) => {
+        if (this.active?.id !== item.segment.id) return;
+        if (result?.ok) { this.finishActive(); return; }
+        if (!this.createFallbackSpeech) { console.warn("PXHDubbingYooToob: Chrome TTS lỗi", result?.message); this.stopActive(); return; }
+        this.active = { id: item.segment.id };
+        try {
+          const blob = await this.createFallbackSpeech(item.segment, item.text!);
+          if (this.active?.id !== item.segment.id) return;
+          const fallback: ScheduledAudio = { segment: item.segment, url: URL.createObjectURL(blob) };
+          this.items.set(item.segment.id, fallback);
+          this.active = undefined;
+          this.played.delete(item.segment.id);
+          if (!this.video.paused && this.video.currentTime * 1000 - item.segment.startMs <= MAX_START_LATENESS_MS) this.play(fallback);
+        } catch (error) {
+          console.warn("PXHDubbingYooToob: TTS dự phòng lỗi", error);
+          if (this.active?.id === item.segment.id) this.stopActive();
+        }
+      }, () => { if (this.active?.id === item.segment.id) this.stopActive(); });
       return;
     }
     if (!item.url) return;

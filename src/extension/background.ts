@@ -542,16 +542,23 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   }
   if (request?.action === "tts-speak" && request.text) {
     chrome.tts.getVoices((voices) => {
-      const voice = voices.find((item) => item.lang?.toLowerCase().startsWith("vi"));
-      if (!voice) { respond({ ok: false, message: "Máy chưa có giọng đọc tiếng Việt" }); return; }
-      chrome.tts.speak(request.text!, {
-        lang: voice.lang ?? "vi-VN", ...(voice.voiceName ? { voiceName: voice.voiceName } : {}),
-        rate: Math.max(0.5, Math.min(2, request.rate ?? 1)), volume: 1,
-        onEvent: (event) => {
-          if (event.type === "end") respond({ ok: true });
-          else if (["error", "cancelled", "interrupted"].includes(event.type)) respond({ ok: false, message: event.errorMessage ?? event.type });
-        },
-      });
+      const vietnamese = voices.filter((item) => item.lang?.toLowerCase().startsWith("vi"))
+        .sort((left, right) => Number(Boolean(left.remote)) - Number(Boolean(right.remote)));
+      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng đọc tiếng Việt" }); return; }
+      const attempt = (index: number): void => {
+        const voice = vietnamese[index];
+        if (!voice) { respond({ ok: false, message: "Tất cả giọng Chrome tiếng Việt đều lỗi" }); return; }
+        chrome.tts.speak(request.text!, {
+          lang: voice.lang ?? "vi-VN", ...(voice.voiceName ? { voiceName: voice.voiceName } : {}),
+          rate: Math.max(0.5, Math.min(2, request.rate ?? 1)), volume: 1,
+          onEvent: (event) => {
+            if (event.type === "end") respond({ ok: true, voice: voice.voiceName });
+            else if (event.type === "error" && index + 1 < vietnamese.length) attempt(index + 1);
+            else if (["error", "cancelled", "interrupted"].includes(event.type)) respond({ ok: false, message: event.errorMessage ?? event.type });
+          },
+        });
+      };
+      attempt(0);
     });
     return true;
   }
