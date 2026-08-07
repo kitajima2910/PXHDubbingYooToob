@@ -22,6 +22,7 @@ app.innerHTML = `
   <section class="api-card training-card">
     <div class="api-heading"><div><span>PRE-TRAIN PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
     <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="https://youtube.com/playlist?list=..."><button id="trainPlaylist" type="submit">Train</button></form>
+    <button id="resetTraining" class="default-key" type="button">Đặt lại job bị treo</button>
   </section>
   <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
 
@@ -92,6 +93,9 @@ void renderKeyState();
 
 const trainingButton = query<HTMLButtonElement>("#trainPlaylist");
 const trainingInput = query<HTMLInputElement>("#playlistUrl");
+query<HTMLButtonElement>("#resetTraining").addEventListener("click", () => {
+  void chrome.runtime.sendMessage({ action: "playlist-train-reset" }).then(() => renderTrainingState());
+});
 async function renderTrainingState(): Promise<void> {
   const stored = await chrome.storage.local.get("playlistTraining");
   const training = stored.playlistTraining as { running?: boolean; message?: string } | undefined;

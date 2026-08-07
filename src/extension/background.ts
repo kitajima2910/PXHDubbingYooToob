@@ -6,6 +6,16 @@ const requests = new Map<string, AbortController>();
 
 interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number }
 let playlistTrainingJob: Promise<void> | undefined;
+let playlistTrainingCancelled = false;
+
+async function resetInterruptedTraining(): Promise<void> {
+  const stored = (await chrome.storage.local.get("playlistTraining")).playlistTraining as { running?: boolean } | undefined;
+  if (stored?.running) {
+    await chrome.storage.local.set({ playlistTraining: { running: false, message: "Job cũ đã bị gián đoạn — có thể Train lại" } });
+  }
+}
+chrome.runtime.onInstalled.addListener(() => { void resetInterruptedTraining(); });
+chrome.runtime.onStartup.addListener(() => { void resetInterruptedTraining(); });
 
 async function postTrainingApi(path: "/api/cache" | "/api/translate", body: unknown): Promise<any> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -75,6 +85,7 @@ async function trainPlaylist(value: string): Promise<PlaylistTrainingResult> {
   const result: PlaylistTrainingResult = { total: videoIds.length, trained: 0, skipped: 0, segments: 0 };
   await chrome.storage.local.set({ playlistTraining: { ...result, running: true, message: "Đang đọc playlist" } });
   for (const [videoIndex, videoId] of videoIds.entries()) {
+    if (playlistTrainingCancelled) throw new Error("Job train đã được hủy");
     try {
       const segments = (await loadTrainingTranscript(videoId)).slice(0, 2_000);
       if (!segments.length) throw new Error("Transcript rỗng");
@@ -114,6 +125,7 @@ async function trainPlaylist(value: string): Promise<PlaylistTrainingResult> {
 
 function startPlaylistTraining(value: string): void {
   if (playlistTrainingJob) return;
+  playlistTrainingCancelled = false;
   playlistTrainingJob = chrome.storage.local.set({ playlistTraining: { running: true, message: "Đang khởi tạo playlist" } })
     .then(() => trainPlaylist(value)).then(() => undefined, async (error: unknown) => {
     const message = error instanceof Error ? error.message : "Không thể train playlist";
@@ -298,6 +310,12 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
+  if (request?.action === "playlist-train-reset") {
+    playlistTrainingCancelled = true;
+    void chrome.storage.local.set({ playlistTraining: { running: false, message: "Đã đặt lại job — có thể Train lại" } })
+      .then(() => respond({ ok: true }));
+    return true;
+  }
   if (request?.action === "playlist-train" && typeof request.body === "string") {
     startPlaylistTraining(request.body);
     respond({ ok: true, started: true });
