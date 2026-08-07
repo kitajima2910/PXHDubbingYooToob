@@ -20,6 +20,8 @@ let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let trainingRecorder: MediaRecorder | undefined;
 let trainingStream: MediaStream | undefined;
+let trainingKeepAlivePort: chrome.runtime.Port | undefined;
+let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 
@@ -72,6 +74,10 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 }
 
 function stopTrainingRecorder(): void {
+  window.clearInterval(trainingKeepAliveTimer);
+  trainingKeepAliveTimer = 0;
+  trainingKeepAlivePort?.disconnect();
+  trainingKeepAlivePort = undefined;
   if (trainingRecorder?.state !== "inactive") trainingRecorder?.stop();
   trainingRecorder = undefined;
   trainingStream?.getTracks().forEach((track) => track.stop());
@@ -80,6 +86,10 @@ function stopTrainingRecorder(): void {
 
 function startTrainingRecorder(video: HTMLVideoElement): void {
   stopTrainingRecorder();
+  trainingKeepAlivePort = chrome.runtime.connect({ name: "playlist-training-keepalive" });
+  trainingKeepAliveTimer = window.setInterval(() => {
+    try { trainingKeepAlivePort?.postMessage({ active: true, currentMs: Math.round(video.currentTime * 1000) }); } catch { /* Port closed during extension reload. */ }
+  }, 20_000);
   const captureStream = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream;
   if (typeof captureStream !== "function") throw new Error("Trình duyệt không hỗ trợ thu audio trực tiếp từ video");
   const captured = captureStream.call(video);

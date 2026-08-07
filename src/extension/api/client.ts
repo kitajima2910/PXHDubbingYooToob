@@ -1,5 +1,6 @@
 import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
+import { translateWithBrowser } from "../translation/browser-translator";
 
 interface ApiResponse<T> { ok: boolean; status: number; data?: T; audioBase64?: string; mimeType?: string; message?: string }
 export interface CacheContext { videoId: string; sourceLanguage: string }
@@ -39,10 +40,22 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
   const missing = segments.filter((segment) => !cachedById.has(segment.id));
   let translatedMissing: SubtitleSegment[] = [];
   if (missing.length) {
-    const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
-      segments: missing.map(({ id, sourceText }) => ({ id, sourceText })), sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
-    }, signal);
-    translatedMissing = mapTranslations(missing, result.segments);
+    try {
+      const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
+        segments: missing.map(({ id, sourceText }) => ({ id, sourceText })), sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
+      }, signal);
+      translatedMissing = mapTranslations(missing, result.segments);
+    } catch (cloudError) {
+      if (signal?.aborted) throw cloudError;
+      try {
+        translatedMissing = await translateWithBrowser(missing);
+        console.info("PXHDubbingYooToob: Groq không khả dụng, đang dùng Translator API trên máy");
+      } catch (localError) {
+        const cloudMessage = cloudError instanceof Error ? cloudError.message : "Groq không khả dụng";
+        const localMessage = localError instanceof Error ? localError.message : "dịch trên máy không khả dụng";
+        throw new Error(`${cloudMessage}; dự phòng offline: ${localMessage}`);
+      }
+    }
     if (cache) void cachePost({
       action: "translations:put", sourceLanguage: cache.sourceLanguage, targetLanguage: "vi",
       segments: translatedMissing.map((segment) => ({ sourceText: segment.sourceText, translatedText: segment.translatedText ?? segment.sourceText })),

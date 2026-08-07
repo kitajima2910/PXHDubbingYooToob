@@ -23,6 +23,10 @@ async function resetInterruptedTraining(): Promise<void> {
 }
 chrome.runtime.onInstalled.addListener(() => { void resetInterruptedTraining(); });
 chrome.runtime.onStartup.addListener(() => { void resetInterruptedTraining(); });
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "playlist-training-keepalive") return;
+  port.onMessage.addListener(() => { /* Port traffic keeps the MV3 worker alive during long videos. */ });
+});
 
 async function postTrainingApi(path: "/api/cache" | "/api/translate" | "/api/transcribe", body: unknown, signal?: AbortSignal): Promise<any> {
   let lastError: Error | undefined;
@@ -158,7 +162,7 @@ async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): 
   const allSegments: BackgroundSegment[] = [...(cached.segments ?? [])];
   let completed = false;
   try {
-    const started = await chrome.tabs.sendMessage(tabId, { action: "training-playback-start", startMs: capturedUntilMs }) as { ok?: boolean; message?: string };
+    const started = await chrome.tabs.sendMessage(tabId, { action: "training-playback-start", startMs: capturedUntilMs }) as { ok?: boolean; message?: string; durationMs?: number };
     if (!started?.ok) throw new Error(started?.message ?? "Không thể phát video để nhận dạng audio");
     while (!signal.aborted) {
       const chunk = await waitForTrainingChunk(trainingAudioCapture, signal);
@@ -177,9 +181,10 @@ async function whisperTrainingTranscript(videoId: string, signal: AbortSignal): 
       capturedUntilMs = toMs;
       progress[videoId] = capturedUntilMs;
       await chrome.storage.local.set({ playlistTrainingWhisperProgress: progress });
-      await chrome.storage.local.set({ playlistTraining: { running: true, message: `Whisper ${videoId}: ${Math.round(capturedUntilMs / 1000)} giây` } });
+      await chrome.storage.local.set({ playlistTraining: { running: true, updatedAt: Date.now(), message: `Whisper ${videoId}: ${Math.round(capturedUntilMs / 1000)} giây` } });
       const playback = await chrome.tabs.sendMessage(tabId, { action: "training-playback-status" }) as { ended?: boolean; currentMs?: number };
-      if (playback?.ended || (typeof playback?.currentMs === "number" && playback.currentMs + 1_000 < capturedUntilMs)) { completed = true; break; }
+      const durationReached = typeof started.durationMs === "number" && started.durationMs > 0 && capturedUntilMs >= started.durationMs - 750;
+      if (durationReached || playback?.ended || (typeof playback?.currentMs === "number" && playback.currentMs + 1_000 < capturedUntilMs)) { completed = true; break; }
     }
   } finally {
     trainingAudioCapture = undefined;
@@ -232,11 +237,16 @@ async function trainPlaylist(value: string, signal: AbortSignal): Promise<Playli
     try {
       const segments = (await loadTrainingTranscriptWithFallback(videoId, signal)).slice(0, 2_000);
       if (!segments.length) throw new Error("Transcript rỗng");
+      await chrome.storage.local.set({ playlistTraining: { ...result, running: true, updatedAt: Date.now(), message: `Đã đọc xong ${videoId} — đang lưu transcript` } });
       await postTrainingApi("/api/cache", {
         action: "transcript:put", videoId, sourceLanguage: "auto", source: "Playlist trainer", complete: true, segments,
       }, signal);
       for (let index = 0; index < segments.length; index += 20) {
         const batch = segments.slice(index, index + 20);
+        await chrome.storage.local.set({ playlistTraining: {
+          ...result, running: true, updatedAt: Date.now(),
+          message: `Đang dịch ${videoId}: ${Math.min(index + batch.length, segments.length)}/${segments.length} câu`,
+        } });
         const cached = await postTrainingApi("/api/cache", {
           action: "translations:get", sourceLanguage: "auto", targetLanguage: "vi",
           segments: batch.map(({ id, sourceText }) => ({ id, sourceText })),
