@@ -3,6 +3,7 @@ import { batchSegments, selectUpcomingSegments, stripTranscriptTimestamps } from
 import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTranscript, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
+import { prepareBrowserTranslation } from "./translation/browser-translator";
 
 let state: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
 let scheduler: AudioScheduler | undefined;
@@ -374,6 +375,13 @@ function fail(message: string): ExtensionState { update({ enabled: false, status
 
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; startMs?: number }, _sender, respond) => {
   if (request.action === "training-ready") { respond({ ok: true, videoId: videoId() }); return; }
+  if (request.action === "prepare-offline-translation") {
+    void prepareBrowserTranslation().then(
+      (message) => respond({ ok: true, message }),
+      (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Dịch offline không khả dụng" }),
+    );
+    return true;
+  }
   if (request.action === "status") { respond(state); return; }
   if (request.action === "training-playback-start") {
     const video = document.querySelector<HTMLVideoElement>("video");

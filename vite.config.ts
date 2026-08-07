@@ -2,6 +2,15 @@ import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
 export default defineConfig({
+  plugins: [{
+    name: "standalone-content-script",
+    generateBundle(_options, bundle) {
+      const content = Object.values(bundle).find((item) => item.type === "chunk" && item.isEntry && item.name === "content");
+      if (content?.type === "chunk" && content.imports.length) {
+        this.error(`content.js phải standalone; đang import: ${content.imports.join(", ")}`);
+      }
+    },
+  }],
   publicDir: "public",
   build: {
     outDir: "dist",

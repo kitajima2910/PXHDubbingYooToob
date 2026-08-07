@@ -1,7 +1,6 @@
 import type { ExtensionState } from "../shared/types";
 import "./popup.css";
 import "./training.css";
-import { prepareBrowserTranslation } from "./translation/browser-translator";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
@@ -137,7 +136,7 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
     }
     // Start any browser-managed language-pack download during the user's click.
     // This is best-effort and never blocks the normal Groq/cache path.
-    void prepareBrowserTranslation().catch(() => undefined);
+    void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
     if (result.source.startsWith("Whisper") && !capture?.ok) {
