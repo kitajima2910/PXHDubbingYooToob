@@ -6,7 +6,6 @@ import translate from "../src/api/translate.js";
 import tts from "../src/api/tts.js";
 import youtubeSubtitles from "../src/api/subtitles/youtube.js";
 import transcribe from "../src/api/transcribe.js";
-import assemblyToken from "../src/api/assemblyai/token.js";
 
 function loadLocalEnvironment(): void {
   try {
@@ -40,7 +39,7 @@ function adaptResponse(response: ServerResponse): VercelResponse {
 
 loadLocalEnvironment();
 const port = Number(process.env.PORT ?? 3000);
-const handlers = new Map([["/api/translate", translate], ["/api/tts", tts], ["/api/subtitles/youtube", youtubeSubtitles], ["/api/transcribe", transcribe], ["/api/assemblyai/token", assemblyToken]]);
+const handlers = new Map([["/api/translate", translate], ["/api/tts", tts], ["/api/subtitles/youtube", youtubeSubtitles], ["/api/transcribe", transcribe]]);
 
 createServer(async (request, response) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;

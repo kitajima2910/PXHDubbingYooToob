@@ -44,7 +44,3 @@ export async function loadBackendCaptions(videoId: string, fromMs: number, toMs:
 export async function transcribeAudio(audioBase64: string, mimeType: string, signal?: AbortSignal): Promise<{ segments: SubtitleSegment[]; source: string; language?: string }> {
   return post<{ segments: SubtitleSegment[]; source: string; language?: string }>("/api/transcribe", { audioBase64, mimeType }, signal);
 }
-
-export async function createAssemblyToken(signal?: AbortSignal): Promise<{ token: string; expiresInSeconds: number }> {
-  return post<{ token: string; expiresInSeconds: number }>("/api/assemblyai/token", {}, signal);
-}

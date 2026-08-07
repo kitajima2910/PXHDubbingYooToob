@@ -4,7 +4,7 @@ Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube
 
 ## Trạng thái
 
-Bản hiện tại ưu tiên transcript DOM → Groq dịch → Chrome TTS theo timestamp. Video không có transcript dùng AssemblyAI Whisper Streaming; nếu streaming lỗi sẽ quay về Groq Whisper 5 giây. Máy không có giọng Việt trong Chrome sẽ dùng Edge TTS `vi-VN-HoaiMyNeural`. Xem [STATUS.md](./STATUS.md).
+Bản hiện tại ưu tiên transcript DOM → Groq dịch → Chrome TTS theo timestamp. Video không có transcript dùng Groq Whisper theo chunk 5 giây. Máy không có giọng Việt trong Chrome sẽ dùng Edge TTS `vi-VN-HoaiMyNeural`. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
@@ -21,7 +21,7 @@ API key chỉ tồn tại trong biến môi trường backend. Extension không 
 Yêu cầu Node.js 20 trở lên.
 
 1. Chạy `npm install`.
-2. Sao chép `.env.example` thành `.env.local`, điền `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY` và giữ file này ngoài Git.
+2. Sao chép `.env.example` thành `.env.local`, điền `GROQ_API_KEY` và giữ file này ngoài Git.
 3. Chạy `npm run dev:api` để chạy API local tại `http://localhost:3000`; lệnh này không yêu cầu đăng nhập Vercel.
 4. Ở terminal khác, chạy `npm run dev` khi phát triển hoặc `npm run build` để tạo extension trong `dist`.
 5. Mở `chrome://extensions`, bật **Chế độ dành cho nhà phát triển**, chọn **Tải tiện ích đã giải nén** và chọn thư mục `dist`.
@@ -30,7 +30,7 @@ Yêu cầu Node.js 20 trở lên.
 ## Triển khai Vercel
 
 1. Import repository vào Vercel.
-2. Thêm `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GROQ_TRANSLATION_MODEL` và `EXTENSION_ORIGIN` trong Project Settings → Environment Variables.
+2. Thêm `GROQ_API_KEY`, `GROQ_TRANSLATION_MODEL` và `EXTENSION_ORIGIN` trong Project Settings → Environment Variables.
 3. Deploy, rồi build extension với `VITE_API_BASE_URL=https://ten-du-an.vercel.app`.
 4. Để cấp quyền tối thiểu khi phát hành, thay mẫu `https://*.vercel.app/*` trong `public/manifest.json` bằng đúng tên miền backend rồi build lại.
 5. Sau khi Chrome cấp ID extension, đặt `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại backend.

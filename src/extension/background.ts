@@ -1,7 +1,7 @@
 import { YoutubeTranscript } from "youtube-transcript";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/assemblyai/token"]);
+const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe"]);
 const requests = new Map<string, AbortController>();
 
 async function ensureOffscreenDocument(): Promise<void> {
@@ -179,7 +179,7 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; token?: string; text?: string; rate?: number } | null;
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
   if (request?.action === "capture-start") {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
@@ -196,15 +196,6 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "capture-reset") {
     void chrome.runtime.sendMessage({ action: "capture-offscreen-reset" }).then(() => respond({ ok: true }), () => respond({ ok: false }));
     return true;
-  }
-  if (request?.action === "assembly-start" && request.token) {
-    void chrome.runtime.sendMessage({ action: "assembly-offscreen-start", token: request.token })
-      .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể bắt đầu AssemblyAI" }));
-    return true;
-  }
-  if ((request?.action === "assembly-turn" || request?.action === "assembly-stream-error") && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, message).catch(() => undefined);
-    respond({ ok: true }); return;
   }
   if (request?.action === "tts-status") {
     chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) => voice.lang?.toLowerCase().startsWith("vi")) }));
