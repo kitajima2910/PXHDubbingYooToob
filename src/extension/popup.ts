@@ -1,6 +1,5 @@
 import type { ExtensionState } from "../shared/types";
 import "./popup.css";
-import "./training.css";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
@@ -20,12 +19,7 @@ app.innerHTML = `
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
     <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
   </section>
-  <section class="api-card training-card">
-    <div class="api-heading"><div><span>PRE-TRAIN VIDEO / PLAYLIST</span><strong id="trainingState">Chưa chạy</strong></div><small>Tối đa 100 video/lần</small></div>
-    <form id="trainingForm"><input id="playlistUrl" type="url" spellcheck="false" placeholder="Dán URL video hoặc playlist YouTube"><button id="trainPlaylist" type="submit">Train</button></form>
-    <button id="resetTraining" class="stop-training" type="button" hidden>Dừng Train</button>
-  </section>
-  <footer>Điều khiển dubbing trực tiếp tại popup này.</footer>`;
+  <footer>Transcript và bản dịch tự lưu khi bạn xem và lồng tiếng.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
 
@@ -36,6 +30,21 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 let tab: chrome.tabs.Tab | undefined;
 let currentState: ExtensionState | undefined;
 let toggling = false;
+
+async function ensureDubbingContent(tabId: number): Promise<ExtensionState> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"], world: "ISOLATED" });
+    try {
+      return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
+    } catch (error) {
+      const detail = error instanceof Error ? `: ${error.message}` : "";
+      throw new Error(`Không thể khởi tạo PXH Dubbing trên tab YouTube${detail}`);
+    }
+  }
+}
 
 function render(state?: ExtensionState): void {
   const value = state ?? { enabled: false, status: "idle", message: "Mở một video YouTube", processedSegments: 0, source: "—" };
@@ -93,45 +102,12 @@ defaultKeyButton.addEventListener("click", () => {
 
 void renderKeyState();
 
-const trainingButton = query<HTMLButtonElement>("#trainPlaylist");
-const trainingInput = query<HTMLInputElement>("#playlistUrl");
-const resetTrainingButton = query<HTMLButtonElement>("#resetTraining");
-void chrome.storage.local.get("playlistTrainingUrl").then(({ playlistTrainingUrl }) => {
-  if (!trainingInput.value && typeof playlistTrainingUrl === "string") trainingInput.value = playlistTrainingUrl;
-});
-trainingInput.addEventListener("input", () => {
-  void chrome.storage.local.set({ playlistTrainingUrl: trainingInput.value });
-});
-resetTrainingButton.addEventListener("click", () => {
-  void chrome.runtime.sendMessage({ action: "playlist-train-reset" }).then(() => renderTrainingState());
-});
-async function renderTrainingState(): Promise<void> {
-  const stored = await chrome.storage.local.get("playlistTraining");
-  const training = stored.playlistTraining as { running?: boolean; message?: string } | undefined;
-  query("#trainingState").textContent = training?.message ?? "Chưa chạy";
-  trainingButton.disabled = training?.running === true;
-  resetTrainingButton.disabled = training?.running !== true;
-  resetTrainingButton.hidden = training?.running !== true;
-}
-query<HTMLFormElement>("#trainingForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const url = trainingInput.value.trim();
-  if (!url) return;
-  void chrome.storage.local.set({ playlistTrainingUrl: url });
-  trainingButton.disabled = true;
-  query("#trainingState").textContent = "Đang khởi tạo…";
-  void chrome.runtime.sendMessage({ action: "playlist-train", body: url }).then((response: { ok?: boolean; message?: string }) => {
-    if (!response?.ok) query("#trainingState").textContent = response?.message ?? "Train thất bại";
-  }).finally(() => { void renderTrainingState(); });
-});
-void renderTrainingState();
-window.setInterval(() => { void renderTrainingState(); }, 1_000);
-
 query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
   if (toggling || !tab?.id) return;
   toggling = true; render(currentState);
   void (async () => {
-    if (currentState?.enabled) {
+    const liveState = await ensureDubbingContent(tab!.id!);
+    if (liveState.enabled) {
       return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
     // Start any browser-managed language-pack download during the user's click.
@@ -153,5 +129,8 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
 void activeTab().then(async (active) => {
   tab = active;
   if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
-  render(await chrome.tabs.sendMessage(tab.id, { action: "status" }).catch(() => undefined) as ExtensionState | undefined);
+  try { render(await ensureDubbingContent(tab.id)); }
+  catch (error) {
+    render({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Không thể khởi tạo extension", processedSegments: 0, source: "—" });
+  }
 });
