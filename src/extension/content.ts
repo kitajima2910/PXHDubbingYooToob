@@ -85,21 +85,26 @@ function stopTrainingRecorder(): void {
   trainingStream = undefined;
 }
 
-function startTrainingRecorder(video: HTMLVideoElement): void {
+async function startTrainingRecorder(video: HTMLVideoElement): Promise<void> {
   stopTrainingRecorder();
+  const captureStream = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream;
+  if (typeof captureStream !== "function") throw new Error("Trình duyệt không hỗ trợ thu audio trực tiếp từ video");
+  const captured = captureStream.call(video);
+  let audioTracks = captured.getAudioTracks();
+  for (let attempt = 0; !audioTracks.length && attempt < 50; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    audioTracks = captured.getAudioTracks();
+  }
+  if (!audioTracks.length) {
+    captured.getTracks().forEach((track) => track.stop());
+    throw new Error("Video đã phát nhưng Brave không cung cấp audio track sau 5 giây");
+  }
+  captured.getVideoTracks().forEach((track) => track.stop());
+  trainingStream = new MediaStream(audioTracks);
   trainingKeepAlivePort = chrome.runtime.connect({ name: "playlist-training-keepalive" });
   trainingKeepAliveTimer = window.setInterval(() => {
     try { trainingKeepAlivePort?.postMessage({ active: true, currentMs: Math.round(video.currentTime * 1000) }); } catch { /* Port closed during extension reload. */ }
   }, 20_000);
-  const captureStream = (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream;
-  if (typeof captureStream !== "function") throw new Error("Trình duyệt không hỗ trợ thu audio trực tiếp từ video");
-  const captured = captureStream.call(video);
-  const audioTracks = captured.getAudioTracks();
-  if (!audioTracks.length) {
-    captured.getTracks().forEach((track) => track.stop());
-    throw new Error("Video chưa cung cấp audio để Whisper nhận dạng");
-  }
-  trainingStream = new MediaStream(audioTracks);
   const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
   const recorder = new MediaRecorder(trainingStream, { mimeType, audioBitsPerSecond: 48_000 });
   trainingRecorder = recorder;
@@ -386,19 +391,20 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   if (request.action === "training-playback-start") {
     const video = document.querySelector<HTMLVideoElement>("video");
     if (!video) { respond({ ok: false, message: "Không tìm thấy trình phát YouTube" }); return; }
-    try {
+    const startSeconds = Math.max(0, (request.startMs ?? 0) / 1000);
+    void (async () => {
       video.loop = false;
       video.playbackRate = 1;
-      video.currentTime = Math.max(0, (request.startMs ?? 0) / 1000);
-      startTrainingRecorder(video);
-    } catch (error) {
-      respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu audio video" });
-      return;
-    }
-    void video.play().then(
-      () => respond({ ok: true, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : 0 }),
-      (error: unknown) => { stopTrainingRecorder(); respond({ ok: false, message: error instanceof Error ? error.message : "YouTube không cho tự phát video" }); },
-    );
+      video.currentTime = startSeconds;
+      await video.play();
+      await startTrainingRecorder(video);
+      // Replay from the exact checkpoint after the stream exposes its audio track.
+      video.currentTime = startSeconds;
+      return { ok: true, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : 0 };
+    })().then(respond, (error: unknown) => {
+      stopTrainingRecorder();
+      respond({ ok: false, message: error instanceof Error ? error.message : "Không thể phát/thu audio video" });
+    });
     return true;
   }
   if (request.action === "training-playback-status") {
