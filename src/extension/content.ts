@@ -146,6 +146,23 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
   }
 }
 
+function webSpeechSpeak(text: string, rate: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const synth = window.speechSynthesis;
+    if (!synth) { reject(new Error("Web Speech không khả dụng")); return; }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "vi-VN";
+    utterance.rate = Math.max(0.5, Math.min(2, rate));
+    const voices = synth.getVoices();
+    const viVoice = voices.find((v) => v.lang.startsWith("vi"));
+    if (viVoice) utterance.voice = viVoice;
+    utterance.onend = () => resolve();
+    utterance.onerror = (event) => reject(new Error(`Web Speech: ${event.error || "unknown"}`));
+    synth.cancel();
+    synth.speak(utterance);
+  });
+}
+
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
   const upcoming = selectUpcomingSegments(segments, fromMs, 60_000, queued);
@@ -342,7 +359,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   const stored = await chrome.storage.local.get(VOICE_STORAGE_KEY);
   const rawVoice = stored[VOICE_STORAGE_KEY];
   currentVoiceId = typeof rawVoice === "string" && isKnownVoice(rawVoice) ? rawVoice : DEFAULT_VOICE_ID;
-  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId));
+  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });

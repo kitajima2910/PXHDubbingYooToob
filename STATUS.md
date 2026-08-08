@@ -49,6 +49,8 @@
 > Cache audio IndexedDB 2026-08-08: `createSpeech` kiểm tra IndexedDB (`pxh-dubbing-audio`, store `blobs`) theo key `tts:` + hash FNV-1a 64-bit của giọng/tốc độ/text trước khi gọi `/api/tts`; replay cùng câu không gọi lại TTS, blob mới được lưu vào cache và tự dọn khi vượt 2000 record. Mọi lỗi IndexedDB đều bỏ qua để không làm hỏng luồng TTS gốc. File thêm/sửa: `src/extension/audio/audio-cache.ts`, `src/extension/api/client.ts`, `tests/audio-cache.test.ts`, `STATUS.md`. Verify: `npm run check` đạt, 9 test audio-cache đạt, 178 test tổng pass, production build đạt và guard `content.js` standalone đạt.
 > Backend verify 2026-08-08: `DATABASE_URL` (`ep-lively-meadow`, PG 17.10) hoạt động, transcript cache 2.839 rows (5 video từ playlist trainer); `DUBBING_DATABASE_URL` (`ep-proud-wildflower`, PG 18.4) hoạt động, translation memory 786 bản dịch (machine). Groq key mới (`gsk_...yS38`) hoạt động: `GET /models` HTTP 200 (15 models), chat completion `llama-3.3-70b-versatile` dịch EN→VI chuẩn (190 tokens), `whisper-large-v3-turbo` xác nhận có trên models list. Backend Vercel production (`pxh-dubbing-yoo-toob.vercel.app`) test E2E: `/api/cache` enabled=true, `/api/translate` HTTP 200 dịch đúng, `/api/tts` HTTP 200 trả 15KB audio/mpeg, `/api/subtitles/youtube` HTTP 200 trả 8 segments video `dQw4w9WgXcQ`.
 > Bước 5 2026-08-08: tối ưu overlap/đồng bộ — `MAX_SMOOTH_RATE` 1.25→1.35, `MAX_PLAYBACK_RATE` 1.35→1.5, `speechCatchupRate` cap 10%→20%, scheduler proactive replacement khi segment đã nói >70% slot và replacement ready; Whisper delay thích ứng `effectiveDelay = delay / video.playbackRate` (min 2s) thay vì cố định 5s. File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`, `tests/scheduler.test.ts`. Verify: `npm run check` đạt, 184 test tổng pass, production build đạt.
+> Bước 6 2026-08-08: dubbing lock — `acquireDubbingLock(videoId, tabId)` trong background dùng `activeDubbing` state để chặn tab khác chạy dubbing cùng video; `releaseDubbingLock` khi stop/detect tab navigate away; `tabs.onRemoved` + `tabs.onUpdated` tự dọn lock. File sửa: `src/extension/background.ts`, `src/extension/popup.ts`. Verify: `npm run check` đạt, 184 test tổng pass, production build đạt.
+> Web Speech fallback 2026-08-08: khi Edge TTS (`/api/tts`) lỗi và Chrome TTS không khả dụng, scheduler thử `window.speechSynthesis` (Web Speech API) chạy client-side trước khi bỏ cuộc. Tham số `webSpeechFallback` mới trong `AudioScheduler` constructor; helper `webSpeechSpeak(text, rate)` trong content.ts nhận diện giọng Việt tự động. File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`. Verify: `npm run check` đạt, production build đạt.
 > File nâng cấp kho global: `.env.example`, `README.md`, `STATUS.md`, `package.json`, `scripts/migrate-global-translations.ts`, `migrations/002_global_translation_memory.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/extension/api/client.ts`, `tests/cache.test.ts`.
 > Verify kho dịch global: `npm run check` đạt, 15/15 test đạt và production build đạt. Project mới có 23 câu migration; smoke test cùng câu qua hai video ID đều cache hit và dữ liệu thử đã được dọn sạch.
 > File đã sửa/thêm: `.env.example`, `README.md`, `package.json`, `package-lock.json`, `scripts/local-api.ts`, `api/cache.ts`, `migrations/001_neon_cache.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/api/translate.ts`, `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/youtube/page-bridge.ts`, `src/shared/segments.ts`, `tests/cache.test.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`.
@@ -146,11 +148,14 @@ Bước 1–2 — `Transcript DOM/Groq Whisper → cache Neon → dịch tiếng
 
 ## Chưa làm
 
-- Bước 3: cache audio bằng IndexedDB.
-- Bước 4 mở rộng: bộ đệm liên tục 30–60 giây và hủy/tải lại chính xác sau seek.
-- Bước 5 mở rộng: tối ưu overlap/chống trùng ở ranh giới audio chunk và đồng bộ Whisper chính xác hơn cho video tốc độ cao.
-- Bước 6: khóa job dùng chung và chống xử lý trùng giữa nhiều người dùng.
-- Fallback Web Speech khi Edge TTS lỗi.
+- ~~Bước 3: cache audio bằng IndexedDB.~~ ✅
+- ~~Bước 4 mở rộng: bộ đệm liên tục 30–60 giây và hủy/tải lại chính xác sau seek.~~ ✅
+- ~~Bước 5 mở rộng: tối ưu overlap/chống trùng ở ranh giới audio chunk và đồng bộ Whisper chính xác hơn cho video tốc độ cao.~~ ✅
+- ~~Bước 6: khóa job dùng chung và chống xử lý trùng giữa nhiều người dùng.~~ ✅
+- ~~Fallback Web Speech khi Edge TTS lỗi.~~ ✅
+- Chrome E2E thật: cần reload extension từ `dist` và test trên YouTube (máy hiện tại chưa có Chrome profile).
+- Chưa có nhận dạng nhiều người nói/gán nhiều giọng và chưa tách giọng nói khỏi nhạc nền.
+- Production-ready: rate limit in-memory, chưa có quota/xác thực người dùng, CORS chưa ngăn client giả mạo.
 
 ## Giới hạn/rủi ro
 

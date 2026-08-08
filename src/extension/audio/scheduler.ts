@@ -34,6 +34,7 @@ export class AudioScheduler {
     private readonly video: HTMLVideoElement,
     private sourceVolume: number,
     private readonly createFallbackSpeech?: (segment: SubtitleSegment, text: string) => Promise<Blob>,
+    private readonly webSpeechFallback?: (text: string, rate: number) => Promise<void>,
   ) {
     this.originalVolume = video.volume;
     this.lastTimelineMs = video.currentTime * 1000;
@@ -102,6 +103,14 @@ export class AudioScheduler {
       void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(async (result: { ok?: boolean; message?: string }) => {
         if (this.active?.id !== item.segment.id) return;
         if (result?.ok) { this.finishActive(); return; }
+        // Fallback: Web Speech API (client-side, không cần server)
+        if (this.webSpeechFallback) {
+          try {
+            await this.webSpeechFallback(item.text!, rate);
+            this.finishActive();
+            return;
+          } catch { /* continue to createFallbackSpeech */ }
+        }
         if (!this.createFallbackSpeech) { console.warn("PXHDubbingYooToob: Chrome TTS lỗi", result?.message); this.stopActive(); return; }
         this.active = { id: item.segment.id };
         try {
