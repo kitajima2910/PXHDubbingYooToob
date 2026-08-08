@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.api.json --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "dev": "vite",
     "dev:api": "tsx scripts/local-api.ts",
     "migrate:global-translations": "tsx scripts/migrate-global-translations.ts",
@@ -21,6 +22,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/chrome": "^0.1.32",
     "@types/node": "^24.10.1",
     "tsx": "^4.23.9",

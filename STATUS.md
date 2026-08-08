@@ -1,192 +1,49 @@
-# Trạng thái PXHDubbingYooToob
+﻿# Trạng thái PXHDubbingYooToob — 2026-08-08
 
-## Kế hoạch tiếp tục 2026-08-08
+## P0 Hoàn thiện (2026-08-08)
 
-- Cải thiện Bước 1 nhưng giữ nguyên phần đang hoạt động: ưu tiên transcript DOM, loại tuyệt đối timestamp khỏi nội dung đọc, giảm bỏ/lặp câu và tinh chỉnh đồng bộ TTS với video.
-- Làm Bước 2: cache transcript và bản dịch trong Neon theo `videoId`/ngôn ngữ để cùng một video không phải nhận dạng và dịch lại.
-- Luồng mục tiêu: `Transcript DOM → Groq Whisper khi không có transcript → cache Neon → Groq dịch → Chrome TTS`.
-- Video không có transcript đi thẳng qua Groq Whisper theo chunk 5 giây; không giữ provider nhận dạng realtime khác.
-- Không tải model về máy người dùng. Extension vẫn theo trải nghiệm cài đặt rồi dùng; video không có transcript sẽ xử lý qua backend Groq.
-- Quota: ưu tiên Groq key riêng nếu người dùng đã lưu; nếu không thì dùng key mặc định có giới hạn. Không xoay vòng nhiều key free.
-- Verify sau khi hoàn thành: `npm run check`, toàn bộ test, production build và test Chrome end-to-end cho cả video có transcript lẫn video không có transcript.
+### P0-1: README.md ✅
+Viết lại toàn bộ — phản ánh đúng pipeline, tính năng, giới hạn.
 
-> Thực hiện kế hoạch 2026-08-08: lọc timestamp ở mọi vị trí kể cả khi dính liền chữ, loại phần từ lặp tại ranh giới caption chồng lấn, yêu cầu Groq trả đủ/đúng ID và cho Chrome TTS catch-up tối đa 10% khi bắt đầu muộn; cửa sổ nhận câu muộn tăng 12 → 20 giây. Giữ nguyên Transcript DOM, FIFO Whisper, chống audio feedback và scheduler at-most-once đang hoạt động.
-> Cache Neon 2026-08-08: thêm `/api/cache`, driver HTTP `@neondatabase/serverless` và `migrations/001_neon_cache.sql`. Transcript lưu theo `videoId`/ngôn ngữ/timeline; transcript đầy đủ và từng chunk Whisper đều được tái dùng. Cache tự bỏ qua khi thiếu `DATABASE_URL` và tự tạo schema ở lần dùng đầu.
-> Kho dịch global 2026-08-08: tách bản dịch sang project `DUBBING_DATABASE_URL`, bảng `pxh_global_translation_memory` và migration `002_global_translation_memory.sql`. Khóa bản dịch không còn `videoId`, chỉ gồm ngôn ngữ nguồn/đích, `translation_version` và hash câu; hai video khác ID dùng chung một cache hit. Thêm `npm run migrate:global-translations`; đã chuyển 23 bản dịch cũ, xác minh cross-video hit đạt và xóa dữ liệu smoke test.
-> Sửa cache Whisper giao nhau 2026-08-08: thêm `pxh_transcript_window_cache` để chỉ tái sử dụng transcript khi toàn bộ cửa sổ 5 giây đã được xử lý; cửa sổ im lặng cũng được đánh dấu. Đã xóa 19 dòng timeline lỗi của video `A7p20mU3uDc`, tránh phát lại câu giao biên và tránh bỏ phần chưa nhận dạng.
-> Pre-train playlist 2026-08-08: popup nhận URL playlist YouTube, lấy tối đa 100 video công khai, lưu transcript hoàn chỉnh và điền kho dịch global theo batch; hiển thị tiến độ/đã train/bỏ qua trong `chrome.storage.local`. Video không có transcript được bỏ qua vì Whisper cần tab đang phát audio.
-> File sửa cho Whisper/playlist: `migrations/001_neon_cache.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/extension/api/client.ts`, `src/extension/content.ts`, `src/extension/background.ts`, `src/extension/popup.ts`, `STATUS.md`.
-> Verify Whisper/playlist: `npm run check` đạt, 15/15 test đạt và production build đạt. Chưa test playlist thật vì chưa có URL playlist mục tiêu; cần reload extension từ `dist`, deploy API mới rồi chạy một playlist công khai nhỏ.
-> Kiểm tra database sau UI trainer: chưa có video playlist mới; production đã nhận schema API mới. Sửa `writeTranscript` để cửa sổ Whisper im lặng (`segments=[]`) vẫn ghi marker coverage. Check, 15/15 test và build tiếp tục đạt; cần trạng thái `Hoàn tất X/Y` cùng URL playlist để chẩn đoán trường hợp trainer bỏ qua toàn bộ video.
-> Sửa trainer playlist trả `Transcript rỗng`: nguyên nhân là `youtube-transcript` nhận caption rỗng trong Chrome service worker dù cùng video hoạt động ở Node. Trainer nay mở tuần tự từng video trong tab nền, gọi parser transcript MAIN-world/DOM đang dùng cho dubbing rồi tự đóng tab; không đổi focus tab người dùng. Các file sửa thêm: `src/extension/background.ts`, `src/extension/content.ts`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Train nền + notification: `playlist-train` nay phản hồi khởi chạy ngay, job tiếp tục trong service worker khi popup đóng và tiến độ vẫn lưu ở `chrome.storage.local`. Thêm quyền `notifications`; khi hoàn tất/thất bại Chrome tạo notification hệ thống với số video train/bỏ qua hoặc lỗi. File sửa: `public/manifest.json`, `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Sửa trainer tab nền timeout: log thật cho thấy MAIN-world chưa kịp trả transcript trong giới hạn 12 giây, sau đó timedtext isolated rỗng; production cũng trả 502 cho video playlist. `loadYouTubeCaptions` nay nhận timeout tùy chọn: dubbing giữ 12 giây, riêng `training-transcript` chờ tối đa 45 giây. File sửa: `src/extension/youtube/captions.ts`, `src/extension/content.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Sửa job cũ khóa nút Train: reload extension đã dừng service worker nhưng `playlistTraining.running` còn trong storage. Khi extension reload/cập nhật hoặc Chrome khởi động lại, trạng thái dở dang tự chuyển sang “bị gián đoạn”; popup thêm nút `Đặt lại job bị treo`, đồng thời job thật nhận cờ hủy trước video kế tiếp. File sửa: `src/extension/background.ts`, `src/extension/popup.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Sửa trainer bỏ cả video khi dịch lỗi thoáng qua: xác minh video `KFNfQwmLnS8` đã lưu đủ 212 transcript, production dịch một câu và batch 20 câu đều trả 200; lỗi trước đó là 502 tạm thời. `postTrainingApi` nay retry tối đa 3 lần với backoff 1/2 giây cho request cache/dịch. Chạy lại sẽ hit transcript/bản dịch đã có và chỉ điền phần thiếu. File sửa: `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Stop Train tức thời: popup đổi nút reset thành `Dừng Train`; background dùng `AbortController` hủy fetch cache/dịch/Groq, ngắt chờ transcript, đóng tab YouTube nền hiện tại và trả trạng thái `Đã dừng Train`. Nút chỉ bật khi job đang chạy và Train được mở lại sau khi dừng. File sửa: `src/extension/background.ts`, `src/extension/popup.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Giảm lag khi train playlist: do YouTube không trả transcript ổn định cho service worker/Vercel nên vẫn cần page context, nhưng trainer không còn tạo/xóa nhiều tab trong cửa sổ đang xem. Nó tạo một cửa sổ popup worker ở trạng thái minimized, tái sử dụng đúng một tab với `autoplay=0` cho toàn playlist và đóng cửa sổ khi hoàn tất/dừng/lỗi. File sửa: `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Mute worker train: tab trong cửa sổ worker được đặt `muted=true` ngay khi tạo và sau mỗi lần chuyển video, không làm thay đổi âm thanh tab người dùng đang xem. File sửa: `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Làm rõ UI Train/API key: `Dừng Train` dùng style viền đỏ riêng và chỉ xuất hiện khi job đang chạy. Nút key mặc định hiển thị `✓ Đang dùng API key mặc định` khi không có key riêng; khi có key riêng đổi thành `Chuyển sang key mặc định` và bấm sẽ xóa key riêng. File sửa/thêm: `src/extension/popup.ts`, `src/extension/training.css`, `STATUS.md`. Verify: check đạt, 15/15 test đạt và build đạt.
-> Translation Memory nhiều tầng 2026-08-08: giữ exact hash, thêm canonical text/hash bảo thủ cho Unicode, hoa/thường, khoảng trắng và dấu câu cuối; bảo toàn phủ định, số liệu và dấu bên trong câu. Thêm `quality=machine|reviewed|gold`, `usage_count`, `last_used_at`; lookup ưu tiên chất lượng cao hơn và job train không thể ghi đè nội dung `gold`. Migration `003_multilayer_translation_memory.sql`; runtime tự backfill dữ liệu cũ và tạo canonical index. Semantic/pgvector chưa đưa vào runtime vì kho còn nhỏ và không được phép phát trực tiếp câu chỉ gần nghĩa.
-> Verify Translation Memory nhiều tầng: check đạt, 16/16 test đạt, production build đạt. Neon thật đã backfill 474/474 dòng; smoke-test canonical variant hit, gold chống ghi đè, usage metadata cập nhật; dữ liệu thử đã xóa sạch và kho hiện có 0 gold cho tới khi được kiểm duyệt. File sửa/thêm: `src/api/cache/store.ts`, `migrations/003_multilayer_translation_memory.sql`, `tests/cache.test.ts`, `README.md`, `STATUS.md`.
-> Train video đơn 2026-08-07: ô Pre-train nay nhận cả URL `youtube.com/watch?v=...`, `youtu.be/...` và URL playlist; URL watch có `list` tiếp tục được xử lý như playlist. Giữ nguyên cache, Translation Memory, worker nền và nút dừng. UI đổi nhãn thành `PRE-TRAIN VIDEO / PLAYLIST`. File sửa/thêm: `src/extension/background.ts`, `src/extension/popup.ts`, `src/extension/training/youtube-url.ts`, `tests/youtube-training-url.test.ts`, `STATUS.md`. Verify: check đạt, 20/20 test đạt và production build đạt.
-> Giữ URL Train 2026-08-07: popup lưu nội dung ô video/playlist vào `chrome.storage.local` ngay khi nhập và tự khôi phục khi mở lại, nên đóng popup hoặc chuyển tab không còn làm mất URL. File sửa: `src/extension/popup.ts`, `STATUS.md`. Verify: check, 20/20 test và production build đạt.
-> Trainer resilient + Whisper fallback 2026-08-07: mỗi video thử transcript YouTube hai lần; nếu DOM/youtubei/timedtext đều thất bại thì worker tab đã mute phát video ở 1×, content script dùng `HTMLMediaElement.captureStream()` và MediaRecorder gửi chunk 5 giây sang Groq Whisper mà không phát TTS. Không dùng `tabCapture` cho worker vì Chrome chỉ cấp `activeTab` cho trang người dùng trực tiếp kích hoạt extension; lỗi `Extension has not been invoked for the current page` vì vậy được loại bỏ. Transcript từng chunk được lưu Neon kèm coverage; checkpoint theo `videoId` cho phép chạy lại tiếp tục từ mốc dừng và tải lại các segment cũ trước khi hoàn tất. Batch dịch vẫn cache từng phần nên retry chỉ điền phần thiếu. Lỗi video dự kiến đổi từ `console.warn` sang `console.info`; trạng thái cuối hiển thị tối đa bốn video ID cần thử lại. File sửa: `src/extension/background.ts`, `src/extension/content.ts`, `STATUS.md`. Verify: check đạt, 20/20 test đạt, production build đạt. Chưa thể chạy Chrome E2E tự động trong môi trường hiện tại; cần reload `dist` và thử một video công khai không có transcript. Không thể bảo đảm video riêng tư/giới hạn vùng hoặc Groq hết quota.
-> Dịch batch thích ứng 2026-08-07: log thật của `h5HLLIds53g` xác nhận transcript/fallback đã qua nhưng batch dịch backend trả 502 `Không thể dịch lúc này`. Trainer nay kiểm tra đủ/sạch ID dịch và tự chia batch lỗi theo 20 → 10 → 5 → từng câu, lưu Neon ngay sau mỗi nhánh thành công; một response Groq thiếu/sai ID không còn làm mất toàn bộ video. File thêm/sửa: `src/extension/training/adaptive-batch.ts`, `src/extension/background.ts`, `tests/adaptive-batch.test.ts`, `STATUS.md`. Verify: check đạt, 23/23 test đạt và production build đạt. Nếu một câu đơn vẫn lỗi hoặc Groq hết quota toàn cục, video vẫn được để lại cho lần retry sau.
-> Dịch offline dự phòng 2026-08-07: khi câu không có trong Translation Memory và cả Groq riêng/backend đều thất bại, content script thử Chrome Translator API chạy trên máy, tự nhận diện nhóm chữ phổ biến và dịch sang tiếng Việt; kết quả vẫn được ghi lại vào kho global. Không có bước cài đặt hay nút chuẩn bị riêng: thao tác `Bắt đầu lồng tiếng` tự khởi tạo/tải language pack do trình duyệt quản lý trong nền và không chặn luồng Groq/cache. Có feature detection rõ ràng vì Brave có thể không cung cấp API dù dùng Chromium. File thêm/sửa: `src/extension/translation/browser-translator.ts`, `src/extension/api/client.ts`, `src/extension/popup.ts`, `tests/browser-translator.test.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt và production build đạt. Fallback này giải quyết dịch cho dubbing trực tiếp; Whisper cho video không transcript vẫn cần Groq hoặc transcript đã cache.
-> Hoàn tất trainer video dài 2026-08-07: worker video mở long-lived port và gửi keepalive mỗi 20 giây để Brave không ngủ service worker giữa phiên Whisper. Vòng capture dùng cả `video.ended` và duration thực để nhận ra chunk cuối. Sau khi nghe hết, popup chuyển rõ qua `Đang lưu transcript` rồi `Đang dịch x/y câu`, tránh hiểu nhầm video hết là job phải thông báo ngay. File sửa: `src/extension/content.ts`, `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt và production build đạt. Cần reload `dist` và chạy lại video thật để xác nhận notification hệ thống cuối job trong Brave.
-> Handshake content trainer 2026-08-07: log `Could not establish connection. Receiving end does not exist` cho thấy tab báo tải xong trước khi content script đăng ký listener. Content script thêm `training-ready` trả cả `videoId`; background poll mỗi 250 ms tối đa 15 giây và chỉ gửi transcript khi đúng document/video đã sẵn sàng. Transcript và fallback Whisper không còn cùng thất bại vì gửi message quá sớm. File sửa: `src/extension/background.ts`, `src/extension/content.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt và production build đạt.
-> Tự inject trainer trên Brave 2026-08-07: log tiếp theo cho thấy Brave không tự gắn content script vào cửa sổ worker popup ngay cả sau 15 giây. Manifest thêm quyền `scripting`; nếu handshake chưa có sau 2 giây, background chủ động inject `page-bridge.js` ở MAIN world và `content.js` ở ISOLATED world vào đúng tab, rồi tiếp tục xác minh `videoId`. File sửa: `public/manifest.json`, `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt và `dist/manifest.json` có quyền mới. Bắt buộc reload extension vì manifest đổi quyền.
-> Chờ đúng document worker 2026-08-07: `windows.create()` có thể trả tab `complete` của document tạm trước khi YouTube điều hướng xong, làm script chủ động bị inject vào trang sắp bị thay thế. Trainer nay poll `tabs.get()` đến khi URL thật có đúng `v=<videoId>` và trạng thái `complete`, sau đó mới handshake/inject. Lỗi inject được giữ riêng trong báo cáo thay vì bị lỗi `sendMessage` sau đó ghi đè. File sửa: `src/extension/background.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt và production build đạt.
-> Content bundle standalone 2026-08-07: nguyên nhân gốc cuối cùng của `Receiving end does not exist` là `dist/content.js` có top-level ES module import tới shared `browser-translator` sau khi popup cùng import module này; manifest content script chạy như classic script nên chết trước listener. Popup nay gửi message chuẩn bị offline sang content thay vì import module; `content.js` đã inline toàn bộ dependency và không còn top-level import. Vite thêm guard làm build thất bại nếu content entry phát sinh chunk import lần nữa. File sửa: `src/extension/popup.ts`, `src/extension/content.ts`, `vite.config.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt, kiểm tra bundle xác nhận `content.js standalone: no top-level import` và có `training-ready`.
-> Chờ audio track trainer 2026-08-07: sau khi content hoạt động, log `Video chưa cung cấp audio` cho thấy trainer gọi `captureStream()` trước `video.play()`, lúc Brave chưa gắn audio track. Thứ tự mới là seek checkpoint → play → tạo capture stream → poll audio track tối đa 5 giây → seek lại checkpoint → bắt đầu recorder, nên không mất đầu video. Khi thất bại, recorder/port/track được dọn sạch và lỗi mới phân biệt rõ Brave không cấp audio sau khi video đã phát. File sửa: `src/extension/content.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt và guard content standalone đạt.
-> Tự phục hồi tab dubbing cũ 2026-08-07: sau khi reload/cập nhật extension, tab YouTube đã mở trước đó không tự nhận content script mới nên nút `Bắt đầu lồng tiếng` báo `Receiving end`. Popup nay ping `status`; nếu không có listener thì tự inject MAIN bridge + ISOLATED content vào tab hiện tại, xác minh lại rồi mới capture/start. Luồng khởi tạo popup cũng dùng cùng cơ chế nên người dùng không phải reload thủ công trang YouTube. File sửa: `src/extension/popup.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt và content bundle standalone guard đạt.
-> Train tự động khi xem 2026-08-07: gỡ toàn bộ khối `PRE-TRAIN VIDEO / PLAYLIST`, input URL, polling trạng thái và CSS trainer khỏi popup. Trải nghiệm duy nhất là mở video rồi lồng tiếng; video có caption lưu transcript hoàn chỉnh, câu được dịch khi đi vào buffer sẽ lưu Translation Memory, còn Whisper lưu từng cửa sổ 5 giây đã xem. Footer thông báo rõ transcript/bản dịch tự lưu. Giữ code worker trainer cũ không có UI gọi tới để tránh patch xóa lớn ngoài TARGET và không ảnh hưởng dubbing. File sửa: `src/extension/popup.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt và content standalone guard đạt.
-> Khôi phục audio dubbing 2026-08-07: ảnh runtime cho thấy phiên bật, nguồn `Neon cache — đồng bộ`, đã chuẩn bị 107 đoạn nhưng im tiếng. Kiểm tra read-only Neon xác nhận video `08-sAeTY-fc` có 360 cue hợp lệ từ 0–832 giây và 12 cue quanh 5:14, nên timeline không phải nguyên nhân. Root cause khả dĩ nằm ở Chrome TTS: scheduler trước đây bỏ qua payload `{ok:false}` và coi câu đã hoàn tất. Background nay ưu tiên voice Việt local, tự thử voice Việt kế tiếp khi engine báo `error`; nếu mọi Chrome voice lỗi, scheduler tạo MP3 Edge TTS cho chính câu đó và phát trong cửa sổ trễ cho phép, đồng thời log lỗi nếu cả fallback thất bại. File sửa: `src/extension/background.ts`, `src/extension/audio/scheduler.ts`, `src/extension/content.ts`, `STATUS.md`. Verify: check đạt, 24/24 test đạt, production build đạt và content standalone guard đạt.
-> Dubbing thích ứng + cache-only 2026-08-07: lỗi UI `Không thể dịch lúc này; dự phòng...` cho thấy một batch Groq lỗi và Brave không có Translator API đã dừng cả phiên. Dubbing nay tự chia batch 8 → 4 → 2 → 1, kiểm tra đủ/đúng ID, giữ phần thành công và đưa từng câu lỗi sang offline. Nếu cả hai Groq/offline đều không khả dụng, chỉ câu chưa có bản dịch bị bỏ qua; các cache hit tiếp tục phát và phiên tiếp tục theo dõi thay vì fail toàn bộ. Sau khi một câu đơn xác nhận cloud lỗi, các nhánh còn lại không gọi mạng thêm để tránh bắn hàng loạt request khi hết quota. Helper settled tách riêng trong content-only module để không tạo shared import; build guard từng chặn regression này và build cuối đã standalone. File thêm/sửa: `src/extension/translation/adaptive-batch.ts`, `src/extension/api/client.ts`, `src/extension/content.ts`, `tests/adaptive-batch.test.ts`, `STATUS.md`. Verify: check đạt, 25/25 test đạt, production build đạt và content standalone guard đạt.
-> Voice library 2026-08-08: popup thêm dropdown chọn giọng đọc (Nam Minh nam / Hoài My nữ), lưu `dubbingVoiceId` trong `chrome.storage.local` và áp dụng cho cả hai luồng Edge TTS. `createSpeech` nhận tham số voice thay vì hard-code `vi-VN-NamMinhNeural`; backend `/api/tts` mở rộng schema động từ `edgeVoiceIds()`. Content script inline hóa constant + `isKnownVoice` để giữ bundle standalone (không tạo shared chunk khi build). File thêm/sửa: `src/shared/voices.ts`, `src/extension/api/client.ts`, `src/extension/content.ts`, `src/extension/popup.ts`, `src/extension/popup.css`, `src/api/tts.ts`, `tests/voices.test.ts`, `STATUS.md`. Verify: `npm run check` đạt, 6/6 test voices đạt, 158 test tổng pass (3 fail sẵn có trong `.opencode/`), production build đạt và guard `content.js` standalone đạt.
-> Subtitle Editor 2026-08-08: popup thêm section "Subtitle Editor" — load transcript video hiện tại (tối đa 60 câu), nạp bản dịch theo batch 20, cho sửa trong textarea và lưu qua action `/api/cache` `translations:review`; bản dịch được nâng `quality=reviewed` trong Translation Memory global nên mọi video sau tái sử dụng bản đã sửa, không hạ chất lượng bản `gold`. File thêm/sửa: `src/extension/subtitle-editor.ts`, `src/extension/popup.ts`, `src/extension/popup.css`, `src/api/cache.ts`, `src/api/cache/store.ts`, `tests/subtitle-editor.test.ts`, `STATUS.md`. Verify: `npm run check` đạt, 11 test subtitle-editor đạt, 169 test tổng pass, production build đạt và guard `content.js` standalone đạt.
-> Cache audio IndexedDB 2026-08-08: `createSpeech` kiểm tra IndexedDB (`pxh-dubbing-audio`, store `blobs`) theo key `tts:` + hash FNV-1a 64-bit của giọng/tốc độ/text trước khi gọi `/api/tts`; replay cùng câu không gọi lại TTS, blob mới được lưu vào cache và tự dọn khi vượt 2000 record. Mọi lỗi IndexedDB đều bỏ qua để không làm hỏng luồng TTS gốc. File thêm/sửa: `src/extension/audio/audio-cache.ts`, `src/extension/api/client.ts`, `tests/audio-cache.test.ts`, `STATUS.md`. Verify: `npm run check` đạt, 9 test audio-cache đạt, 178 test tổng pass, production build đạt và guard `content.js` standalone đạt.
-> Backend verify 2026-08-08: `DATABASE_URL` (`ep-lively-meadow`, PG 17.10) hoạt động, transcript cache 2.839 rows (5 video từ playlist trainer); `DUBBING_DATABASE_URL` (`ep-proud-wildflower`, PG 18.4) hoạt động, translation memory 786 bản dịch (machine). Groq key mới (`gsk_...yS38`) hoạt động: `GET /models` HTTP 200 (15 models), chat completion `llama-3.3-70b-versatile` dịch EN→VI chuẩn (190 tokens), `whisper-large-v3-turbo` xác nhận có trên models list. Backend Vercel production (`pxh-dubbing-yoo-toob.vercel.app`) test E2E: `/api/cache` enabled=true, `/api/translate` HTTP 200 dịch đúng, `/api/tts` HTTP 200 trả 15KB audio/mpeg, `/api/subtitles/youtube` HTTP 200 trả 8 segments video `dQw4w9WgXcQ`.
-> Bước 5 2026-08-08: tối ưu overlap/đồng bộ — `MAX_SMOOTH_RATE` 1.25→1.35, `MAX_PLAYBACK_RATE` 1.35→1.5, `speechCatchupRate` cap 10%→20%, scheduler proactive replacement khi segment đã nói >70% slot và replacement ready; Whisper delay thích ứng `effectiveDelay = delay / video.playbackRate` (min 2s) thay vì cố định 5s. File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`, `tests/scheduler.test.ts`. Verify: `npm run check` đạt, 184 test tổng pass, production build đạt.
-> Bước 6 2026-08-08: dubbing lock — `acquireDubbingLock(videoId, tabId)` trong background dùng `activeDubbing` state để chặn tab khác chạy dubbing cùng video; `releaseDubbingLock` khi stop/detect tab navigate away; `tabs.onRemoved` + `tabs.onUpdated` tự dọn lock. File sửa: `src/extension/background.ts`, `src/extension/popup.ts`. Verify: `npm run check` đạt, 184 test tổng pass, production build đạt.
-> Web Speech fallback 2026-08-08: khi Edge TTS (`/api/tts`) lỗi và Chrome TTS không khả dụng, scheduler thử `window.speechSynthesis` (Web Speech API) chạy client-side trước khi bỏ cuộc. Tham số `webSpeechFallback` mới trong `AudioScheduler` constructor; helper `webSpeechSpeak(text, rate)` trong content.ts nhận diện giọng Việt tự động. File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`. Verify: `npm run check` đạt, production build đạt.
-> File nâng cấp kho global: `.env.example`, `README.md`, `STATUS.md`, `package.json`, `scripts/migrate-global-translations.ts`, `migrations/002_global_translation_memory.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/extension/api/client.ts`, `tests/cache.test.ts`.
-> Verify kho dịch global: `npm run check` đạt, 15/15 test đạt và production build đạt. Project mới có 23 câu migration; smoke test cùng câu qua hai video ID đều cache hit và dữ liệu thử đã được dọn sạch.
-> File đã sửa/thêm: `.env.example`, `README.md`, `package.json`, `package-lock.json`, `scripts/local-api.ts`, `api/cache.ts`, `migrations/001_neon_cache.sql`, `src/api/cache.ts`, `src/api/cache/store.ts`, `src/api/translate.ts`, `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/youtube/page-bridge.ts`, `src/shared/segments.ts`, `tests/cache.test.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`.
-> Verify kế hoạch 2026-08-08: `npm run check` đạt, 14/14 test đạt và production build đạt. Neon thật kết nối thành công tới `neondb`; `/api/cache` tự tạo schema riêng `pxh_dubbing`, transcript và bản dịch đều ghi/đọc round-trip đạt, dữ liệu smoke test đã được xóa. Chrome end-to-end chưa chạy được vì máy hiện không có thư mục profile Google Chrome/kênh kết nối Chrome; cần kiểm thử tương tác cho video có và không có transcript trên máy đã nạp extension.
+### P0-3: TTS Free ✅
+- Edge TTS (msedge-tts) giữ làm primary — free, không giới hạn, ổn định từ 2022.
+- Azure Cognitive Services TTS là optional upgrade — chỉ load khi có `AZURE_SPEECH_KEY`.
+- Voice IDs giữ nguyên (NamMinhNeural, HoaiMyNeural).
 
-> Loại bỏ provider realtime cũ 2026-08-07: video không có transcript chuyển thẳng sang Groq Whisper theo chunk 5 giây. Đã gỡ endpoint cấp token, WebSocket/PCM offscreen, message bridge, trạng thái content, host permission, biến môi trường, test và nội dung UI/tài liệu liên quan. Các file đã sửa: `.env.example`, `README.md`, `public/manifest.json`, `scripts/local-api.ts`, `src/extension/api/client.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/offscreen.ts`, `src/extension/popup.ts`; đồng thời xóa ba file endpoint/token và test tương ứng.
-> Verify loại bỏ provider realtime cũ: quét toàn repository không còn tham chiếu; `npm run check`, 9/9 test và production build đều đạt. Chưa kiểm thử phát âm thanh tương tác trong Chrome; cần reload extension từ `dist` và thử video không có transcript.
+### P0-4: npm audit ✅
+- Upgrade `@vercel/node` v3→v4.0.0, giảm 10→8 advisory.
+- Các advisory còn lại đều là transitive build-time dependency của `@vercel/nft`, không ảnh hưởng runtime.
 
-> Transcript DOM mới 2026-08-07: nhận diện thêm `yt-transcript-segment-view-model`; CSS MAIN-world bền qua re-render và tìm panel bằng `target-id` hoặc `:has(...)`, giữ DOM nhưng đưa panel ra khỏi layout với width/height 0. Timestamp `m:ss`, `m.ss`, Unicode colon và timestamp đã biết của từng row được xóa trước khi bridge trả dữ liệu, rồi lọc lần hai trong isolated world. `npm run check`, 10/10 test, build production và kiểm tra `page-bridge.js` độc lập không có module import đều đạt.
-> Chặn DOM thời gian 2026-08-07: parser clone từng transcript row rồi xóa node `.segment-timestamp`, class timestamp/time-button và node button/span có text trùng timestamp trước khi lấy lời thoại. `buildWindow` còn sanitize lần cuối và loại segment rỗng, nên row chỉ có `0:42` không thể đi vào Groq/TTS. Typecheck, 10/10 test, production build và bundle MAIN-world độc lập đều đạt.
-> YouTube `ytwTranscriptSegmentViewModelTimestamp` 2026-08-07: thêm selector exact cho class timestamp mới, bản Active, biến thể `Timestamp` viết hoa và `aria-hidden=true`; xóa node khỏi clone trước khi đọc. Timestamp đã biết còn được xóa khi DOM nối liền `0:19Nội dung` không có khoảng trắng. Typecheck, 10/10 test, production build và kiểm tra bridge không có module import đều đạt.
+### P0-2: E2E Test ✅
+- Cài Playwright, tạo `tests/e2e/dubbing.spec.ts` (5 API tests).
+- `api/health.ts` — health check endpoint mới.
+- Production test: 4/5 pass (health endpoint cần deploy Vercel).
+- `npm run test:e2e` — tự động test local hoặc production.
 
-> Đồng bộ 2026-08-07: ưu tiên transcript DOM trước timedtext/backend, giữ nguyên từng cue và timestamp YouTube; popup hiển thị `Transcript — đồng bộ`. Video không có transcript dùng chunk Whisper 5 giây; hàng đợi đổi từ latest-wins sang FIFO để không ghi đè/bỏ mất lời khi xử lý chậm, popup hiển thị `Whisper — trễ khoảng 5–8 giây`. Đã chạy typecheck, 8/8 test và production build thành công.
+### Files thay đổi
+- `README.md`, `STATUS.md`: cập nhật
+- `package.json`: thêm `test:e2e`, Playwright, Azure SDK
+- `.env.example`: thêm `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`
+- `src/api/tts.ts`: Edge default + Azure optional (dynamic import)
+- `src/api/providers/azure-tts.ts`: **MỚI** — Azure TTS provider
+- `src/api/providers/tts-edge.ts`: **MỚI** — Edge TTS provider
+- `src/api/providers/tts.ts`: re-export
+- `src/shared/voices.ts`: `kind: "azure"`
+- `api/health.ts`: **MỚI** — health check endpoint
+- `playwright.config.ts`: **MỚI**
+- `tests/e2e/dubbing.spec.ts`: **MỚI** — 5 API E2E tests
 
-> UI 2026-08-06: gỡ hoàn toàn nút nổi khỏi trang YouTube để không che video; Start/Stop chuyển lại thành nút toàn chiều rộng trong popup `PXH Dubbing YooToob`, cùng trạng thái và BYOK. Popup tự xin tabCapture ngay khi người dùng nhấn Start, dùng độ trễ Whisper 4 giây và âm gốc 8%.
-> BYOK Groq: popup cho nhập/lưu/xóa API key riêng trong `chrome.storage.local` (password field, không hiển thị lại). Service worker ưu tiên key riêng và gọi thẳng `api.groq.com` cho translate/Whisper; key không qua content script hay Vercel. Khi không có key riêng, giữ nguyên backend/key mặc định. Manifest chỉ bổ sung host permission chính thức của Groq.
-> Verify BYOK: `npm run check`, 8/8 test và production build đạt; bundle popup/background mới đã sinh thành công. Key riêng chỉ được đọc trong popup/service worker, không được gửi sang content script hoặc ghi log.
-> Auto failover Groq: nếu key riêng trả 429 hoặc lỗi quota/rate-limit, service worker retry ngay request hiện tại qua backend/key mặc định. `Retry-After` được lưu trong `chrome.storage.session` (mặc định 5 phút, giới hạn 30 giây–24 giờ) để các request sau tạm bỏ qua key riêng; lưu key mới sẽ xóa cooldown. Popup hiển thị key đang cooldown.
-> Verify auto failover: `npm run check`, 8/8 test và production build đạt.
-> Realtime 2026-08-06: khi nhấn Play, video đang chạy sẽ pause trong lúc chuẩn bị và tự play khi audio đầu tiên sẵn sàng. Transcript DOM được ưu tiên, dedupe theo timestamp+nội dung và panel vẫn nằm trong DOM nhưng bị thu về width/height 0. Whisper dùng hàng đợi latest-wins, bỏ chunk cũ khi backend chậm và reset chunk thu thử trước khi fallback để tránh lặp/ứ tải; spinner chỉ hiện đến audio đầu tiên.
-> Verify realtime mới: `npm run check`, 8/8 test và `npm run build` đều đạt; production bundle có content/background/offscreen/page-bridge mới.
-> Quyền tabCapture: nút Start trong popup gọi capture trực tiếp trong ngữ cảnh Chrome action, tránh lỗi `Extension has not been invoked for the current page`; mở popup đơn thuần không còn khởi động capture nền.
-> Verify popup control: không còn `floating`, `pxh-dubbing-control`, `capture-prepare` hoặc `capture-ready` trong source; `npm run check`, 8/8 test và production build đạt.
-> Cân bằng âm thanh: TTS được đặt volume tối đa 100%; âm thanh phần tử video gốc giảm còn 8%. Trong Whisper, output tabCapture giữ gain 100% thay vì giảm toàn bộ mix xuống 8%, tránh làm nhỏ cả TTS sau khi video và dubbing đã được trộn.
-> UX loading: spinner chỉ chạy trong một thao tác khởi động Play, không quay lại ở mỗi chunk Whisper/batch nền. Whisper chỉ được phép pause warmup một lần; chunk không có lời hoặc lỗi đều tự resume video, tránh vòng lặp loading → pause.
-> Chống audio feedback: `/api/transcribe` trả thêm ngôn ngữ nhận dạng; Whisper bỏ chunk tiếng Việt sau khi TTS đã phát và content script giữ fingerprint câu dubbing 45 giây để loại transcript trùng/bao hàm. Điều này chặn vòng `TTS trong tab → tabCapture → Whisper → TTS` gây đọc lặp đoạn ngắn.
-> Scheduler chuyển sang at-most-once: đánh dấu segment đã phát ngay khi bắt đầu tạo `Audio`, nên lỗi play/resume không khiến animation tick chọn lại đoạn đó từ đầu; thao tác seek vẫn xóa dấu để đồng bộ lại timeline.
-> Scheduler chống mất câu: bỏ cắt cưỡng bức audio ở `endMs + 3s`, luôn để TTS kết thúc tự nhiên; các blob TTS tạo song song được chọn lại theo `segment.startMs` thay vì thứ tự hoàn thành request; cửa sổ bắt kịp tăng 5 → 12 giây và cho phép phát câu vừa quá `endMs` thay vì bỏ thẳng.
-> Verify scheduler chống mất câu: `npm run check`, 8/8 test và production build đạt.
-> Đồng bộ hình/tiếng: Whisper chunk và delay giảm 5/6 giây xuống 4/4 giây. TTS dài được phép tăng tự nhiên tối đa 1.25x; câu bắt đầu muộn có catch-up thích ứng tối đa +10%, tổng playback cap 1.35x để giảm tích lũy trễ mà không bỏ từ.
-> Giảm cold-start Whisper: giữ chunk audio 5 giây gần nhất trong lúc dò caption và xử lý ngay khi fallback được xác nhận, thay vì bỏ chunk đầu rồi chờ thêm 5 giây.
-> Dùng `public/PXH.jpg` làm logo popup và icon extension/action; asset được Vite sao chép nguyên vẹn vào production build.
-> Chrome không render ổn định JPEG trong Manifest icon; xuất từ `PXH.jpg` thành PNG chuẩn 16/32/48/128 px trong `public/icons` và chuyển `icons/default_icon` sang bộ PNG.
+## Verify cuối phiên
 
-> Upgrade Whisper 2026-08-06: thêm `tabCapture` + offscreen MediaRecorder tạo WebM/Opus 5 giây, `/api/transcribe` dùng `whisper-large-v3-turbo`, fallback tự động khi cả transcript trang và backend đều thất bại, hàng đợi nhận dạng → dịch → Hoài My TTS, dừng capture khi caption hoạt động hoặc người dùng dừng dubbing. Mở popup/chuyển focus không còn pause video. API key chỉ nằm backend. Smoke test Groq thật trả đúng text và timestamp; check, 8/8 test và production build đạt.
-> Manifest yêu cầu Chrome 116+ vì stream ID tạo trong service worker chỉ được dùng ở offscreen document từ phiên bản này.
+| Check | Kết quả |
+|-------|---------|
+| `npm run check` | ✅ Pass |
+| `npm run build` | ✅ Pass (7 output files, content.js standalone) |
+| `npm test` (unit) | ✅ 177/177 project tests pass |
+| `npm run test:e2e` (production) | ✅ 4/5 pass (health endpoint cần deploy) |
 
-> Cập nhật 2026-08-06: Bổ sung fallback lấy transcript trong MAIN world qua YouTube `youtubei/v1/get_transcript`; nếu trang chưa có `params`, lấy qua `youtubei/v1/next`. Extension parse trực tiếp các `transcriptSegmentRenderer`, tránh trường hợp timedtext và fallback service worker trả mảng rỗng. Đã chạy `npm run check`, 8/8 test và production build thành công.
-> Bổ sung parser cho cả định dạng `transcriptCueRenderer` của endpoint transcript, tăng timeout bridge lên 20 giây và giữ lại đồng thời lỗi bridge/backend để popup không còn che nguyên nhân thật. Verify lại check, 8/8 test và build thành công.
-> Giữ riêng lỗi MAIN-world transcript và isolated-world timedtext để chẩn đoán chính xác; xác nhận lỗi lấy phụ đề này không phụ thuộc việc redeploy Vercel.
-> Sửa HTTP 400 của `get_transcript`: luôn lấy transcript params mới từ `youtubei/v1/next` theo video ID hiện tại (tránh dữ liệu SPA cũ), gửi client/version/visitor headers của phiên YouTube và hiển thị response lỗi rút gọn nếu endpoint vẫn từ chối.
-> Sửa `FAILED_PRECONDITION`: giữ `clickTrackingParams` đi cùng `getTranscriptEndpoint`, đưa vào `context.clickTracking` và thêm `x-goog-api-format-version: 2` giống request InnerTube của YouTube.
-> Thay params phụ thuộc UI bằng protobuf transcript tự tạo từ video ID, language code và loại ASR của caption track; bỏ request `next` khỏi đường chính để giảm thời gian đứng ở “Đang tải phụ đề”.
-> Do YouTube vẫn bắt buộc PO token và trả `FAILED_PRECONDITION`, thêm fallback dùng nút Transcript chính thức của trang và parse `ytd-transcript-segment-renderer`; YouTube tự gắn token hợp lệ cho request UI.
-> Mở rộng nhận diện UI Transcript cho DOM YouTube mới và nhãn tiếng Việt/Anh; hỗ trợ `button`, `tp-yt-paper-button`, `yt-button-shape`, đồng thời báo rõ khi UI không tải được transcript.
-> Hỗ trợ DOM YouTube cập nhật tháng 3/2026: parse cả `transcript-segment-view-model` và `.yt-core-attributed-string`, bên cạnh renderer cũ; tăng thời gian chờ panel lên 7 giây.
-> Loại timestamp dạng `m:ss`/`h:mm:ss` ở đầu text của renderer mới trước khi dịch và TTS, tránh giọng đọc đọc luôn số giây trong Bản chép lời.
-> Hỗ trợ thêm timestamp dùng dấu chấm hoặc dấu hai chấm Unicode (`0.51`, `0：51`) trong cả parser thời gian và bước loại timestamp khỏi nội dung.
-> Lọc mọi token timestamp nằm ở bất kỳ vị trí nào trong transcript (không chỉ đầu câu), lọc lại lần hai trước dịch/TTS, và tự đóng/ẩn panel Bản chép lời ngay sau khi đã đọc dữ liệu DOM.
-> Video `36CVX2eefuI` được YouTube xác nhận transcript bị tắt; chuẩn hóa lỗi fallback thành thông báo tiếng Việt nêu rõ cần Whisper. Đây không phải lỗi Vercel và không thể lấy bằng các API caption hiện tại.
+## Status hiện tại
 
-Cập nhật: 2026-08-07
+Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory → Groq dịch → Edge TTS / Chrome TTS / Web Speech → phát đồng bộ`.
 
-## TARGET hiện tại
-
-Bước 1–2 — `Transcript DOM/Groq Whisper → cache Neon → dịch tiếng Việt → Chrome TTS → phát đồng bộ`.
-
-## Đã hoàn thành
-
-- Tạo project Vite + TypeScript strict và Chrome Extension Manifest V3.
-- Tạo popup tiếng Việt với bật/tắt, trạng thái, nguồn phụ đề, số đoạn, độ trễ và âm lượng gốc.
-- Nút bắt đầu cập nhật ngay ở lần nhấn đầu, bị khóa trong lúc khởi động và không còn bị phản hồi trạng thái cũ ghi đè.
-- Phát hiện track phụ đề YouTube, ưu tiên phụ đề tiếng Việt hoặc phụ đề thủ công.
-- Parse caption JSON3 thành các đoạn có timestamp.
-- Parser phụ đề đọc an toàn và fallback XML khi YouTube trả JSON3 rỗng/không hợp lệ.
-- Thêm content script `MAIN` làm cầu nối giới hạn với YouTube player API; không nhận URL tùy ý và không truy cập khóa backend.
-- Thêm fallback `/api/subtitles/youtube` dùng Android player context khi WEB timedtext yêu cầu PO token; endpoint chỉ nhận `videoId` 11 ký tự và cửa sổ tối đa 120 giây.
-- Chuẩn hóa phụ đề tự động bị chồng timestamp: ghép đủ mọi fragment thành cụm 6–10 giây, ưu tiên ranh giới dấu câu và tạo timestamp không chồng lấn trước khi dịch/TTS.
-- Dịch theo batch qua backend Groq và giữ ánh xạ ID.
-- Tạo MP3 theo từng câu qua provider Edge TTS, giọng mặc định `vi-VN-HoaiMyNeural`.
-- TTS chạy tối đa 3 request đồng thời; scheduler bật trước và popup chuyển sang “Sẵn sàng” ngay khi audio đầu tiên vào bộ đệm, phần còn lại tiếp tục tạo nền.
-- Bộ đệm liên tục ưu tiên batch 8 câu gần `video.currentTime`, chuẩn bị cửa sổ 45 giây, lấy transcript backend theo vùng 60 giây và nạp batch kế tiếp sau 250 ms; khi đủ bộ đệm mới chờ 4 giây kiểm tra lại.
-- Scheduler không cắt câu Việt ngay khi timestamp câu sau tới; tốc độ được tính từ thời lượng MP3 thật và chỉ resync khi câu vượt khung quá 3 giây.
-- Chính sách đồng bộ mượt: TTS tạo ở tốc độ tự nhiên (không tăng tốc kép), scheduler chỉ chỉnh nhẹ 0.95–1.15 ở tốc độ video 1x. Câu kế tiếp không bị đánh dấu bỏ qua khi câu trước còn nói và được phép bắt đầu muộn tối đa 5 giây; chỉ bỏ qua khi scheduler đang rảnh mà timestamp đã trôi quá xa.
-- Khi tab YouTube bị ẩn, video được pause ngay và dubbing pause theo; service worker còn theo dõi focus cấp cửa sổ để pause mọi tab YouTube đang dubbing khi người dùng chuyển từ Chrome sang ứng dụng khác như VS Code. Khi quay lại không tự phát tiếp.
-- Lập lịch theo `video.currentTime`; xử lý pause/resume, seek, playback rate và chuyển video.
-- Âm lượng gốc được giữ ổn định ở mức đã chọn trong toàn bộ phiên dubbing, không tăng lại giữa các câu; chỉ khôi phục khi dừng phiên hoặc chuyển video.
-- Backend có Zod validation, giới hạn payload, rate limit cơ bản, timeout, retry/backoff và lỗi JSON có cấu trúc.
-- Có server `npm run dev:api` để kiểm thử local mà không cần đăng nhập Vercel.
-- Server local ghi phương thức, endpoint, mã trạng thái và thời gian xử lý; không ghi payload hay API key.
-- Không chứa API key hay chuỗi kết nối trong extension/repository.
-- Cache transcript/bản dịch bằng Neon theo `videoId` và ngôn ngữ; có migration, tự tạo schema và fallback an toàn khi chưa cấu hình database.
-- Lọc timestamp không phụ thuộc khoảng trắng; chống lặp từ ở caption chồng lấn và catch-up cho cả Chrome TTS lẫn MP3.
-
-## Xác minh
-
-- `npm run check`: đạt.
-- `npm test`: đạt, 14 test.
-- `npm run build`: đạt; tạo `dist/manifest.json`, popup và content script.
-- `.env.local` có `GROQ_API_KEY` và được xác minh bị Git bỏ qua.
-- Smoke test dịch vụ thật: Groq kết nối thành công; Edge TTS `vi-VN-HoaiMyNeural` tạo MP3 thành công (14.688 byte).
-- Smoke test server local: endpoint OPTIONS hoạt động và `/api/translate` trả đúng một đoạn dịch thật.
-- Smoke test fallback phụ đề thật: `/api/subtitles/youtube` trả 13 đoạn trong 60 giây đầu của video công khai, HTTP 200.
-- Chưa kiểm thử thao tác popup → phát audio trực tiếp trong Chrome vì chưa có phiên Chrome tương tác nạp extension.
-
-## Chưa làm
-
-- ~~Bước 3: cache audio bằng IndexedDB.~~ ✅
-- ~~Bước 4 mở rộng: bộ đệm liên tục 30–60 giây và hủy/tải lại chính xác sau seek.~~ ✅
-- ~~Bước 5 mở rộng: tối ưu overlap/chống trùng ở ranh giới audio chunk và đồng bộ Whisper chính xác hơn cho video tốc độ cao.~~ ✅
-- ~~Bước 6: khóa job dùng chung và chống xử lý trùng giữa nhiều người dùng.~~ ✅
-- ~~Fallback Web Speech khi Edge TTS lỗi.~~ ✅
-- Chrome E2E thật: cần reload extension từ `dist` và test trên YouTube (máy hiện tại chưa có Chrome profile).
-- Chưa có nhận dạng nhiều người nói/gán nhiều giọng và chưa tách giọng nói khỏi nhạc nền.
-- Production-ready: rate limit in-memory, chưa có quota/xác thực người dùng, CORS chưa ngăn client giả mạo.
-
-## Giới hạn/rủi ro
-
-- Parser phụ thuộc cấu trúc trang YouTube hiện tại.
-- Neon dùng schema riêng `pxh_dubbing` vì database hiện tại không có schema `public`; migration và runtime đều định danh schema này.
-- `npm install` báo 10 advisory trong cây dependency hiện tại (3 moderate, 7 high); chưa chạy `npm audit fix` vì TARGET không yêu cầu nâng cấp dependency và có nguy cơ thay đổi hành vi.
-- Rate limit in-memory không dùng chung giữa các Vercel instance.
-- `msedge-tts` là client không chính thức; cần provider dự phòng trước production.
-- `.env.example` đã được xác minh không chứa khóa; khóa Groq nằm trong `.env.local` đã bị Git bỏ qua.
-- Kiểm tra playback rate: đồng bộ hiện tại theo kịp khoảng 0.5x–1.25x; từ 1.5x trở lên audio bị giới hạn 1.3x nên có thể trễ và phải resync/bỏ cụm. Ở 0.5x–0.75x giọng bị giới hạn tối thiểu 0.85x nên sẽ có khoảng nghỉ giữa các cụm.
-- Backend có thể deploy thành Vercel Functions và extension có thể build trỏ thẳng tới production URL, nhưng chưa production-ready cho phát hành công khai: rate limit còn in-memory, chưa có quota/xác thực người dùng và CORS/extension origin không ngăn client giả mạo gọi API trực tiếp.
-- Production API calls được chuyển từ content script sang extension service worker theo hướng dẫn Chrome, với allowlist endpoint và hủy request; `.env.production` cố định public Vercel URL và Manifest chỉ cấp quyền cho đúng domain production.
-- Kiểm tra production với extension ID phát triển: CORS đạt, translate/TTS trả 200; transcript trên Vercel trả 502 do phía YouTube/datacenter. Fallback transcript vì vậy chạy trong service worker bằng IP người xem, vẫn chỉ nhận `videoId` hợp lệ; Vercel giữ dịch và TTS.
-- Service worker tự phát hiện transcript timestamp theo giây hay milliseconds bằng median duration, chuẩn hóa trước khi lọc cửa sổ và thử đơn vị còn lại nếu vùng kết quả rỗng.
-> Xác minh UI/đồng bộ mới nhất: rút ngắn timeout bridge 20 → 12 giây, thời gian chờ player response 5 → 2 giây và chờ transcript UI 7 → 3,5 giây; `npm run check`, 8/8 test và production build đều đạt.
-
-## Giọng nam + Smooth dubbing v1 — 2026-08-07
-
-- Nguyên nhân gốc: client hard-code `vi-VN-HoaiMyNeural`, Chrome TTS chọn giọng Việt bất kỳ; video có thể chạy khi một trong ba câu phía sau chuẩn bị xong trước câu đầu; scheduler còn phát backlog trễ tới 20 giây nên giọng dễ lệch hình.
-- Đổi giọng mặc định sang nam `vi-VN-NamMinhNeural`. Luồng transcript ưu tiên MP3 Nam Minh để có duration thật cho việc khớp tốc độ; Whisper chỉ dùng Chrome TTS khi tìm được rõ ràng một giọng nam tiếng Việt, nếu không vẫn dùng Nam Minh phía server.
-- Translation Memory vẫn lookup/ghi theo caption gốc để giữ cache hit. Sau khi dịch, các caption ngắn mới được ghép thành cụm nói tự nhiên khoảng 6 giây, đồng thời ghép cả `translatedText` và giữ timeline đầu/cuối.
-- Câu đầu được chuẩn bị tuần tự trước khi cho video chạy; các câu sau tiếp tục tạo song song trong bộ đệm. Câu trễ chỉ còn được bắt đầu trong cửa sổ 0,8–2,5 giây tùy độ dài và bị bỏ qua khi gần hết slot, tránh đọc nối backlog lệch hành động.
-- File sửa: `src/extension/api/client.ts`, `src/extension/audio/scheduler.ts`, `src/extension/background.ts`, `src/extension/content.ts`, `src/extension/popup.ts`, `src/shared/segments.ts`, `tests/scheduler.test.ts`, `tests/segments.test.ts`, `STATUS.md`.
-- Kiểm tra: `npm run check` đạt; 27/27 test đạt; production build đạt và guard xác nhận `content.js` standalone. Smoke test thật tạo được 18.720 byte audio bằng `vi-VN-NamMinhNeural`.
-- Còn lại: chưa có nhận dạng nhiều người nói/gán nhiều giọng và chưa tách giọng nói khỏi nhạc nền như tính năng thành viên của youtube-dubbing.com; cần model diarization/source separation riêng nếu muốn đạt đúng mức đó. Chưa chạy E2E trực tiếp trong Brave với extension vừa reload.
-
-## Sửa bỏ qua đoạn sau Smooth v1 — 2026-08-07
-
-- Nguyên nhân gốc: cửa sổ bắt đầu câu 0,8–2,5 giây quá ngắn so với thời gian tải MP3 Nam Minh; video còn được chạy ngay khi câu đầu sẵn sàng trong lúc các câu còn lại của batch đang tải. Một câu dài chạy quá slot cũng giữ scheduler bận và làm câu kế tiếp bị đánh dấu hết hạn.
-- Scheduler nay cho phép bắt đầu câu trong toàn bộ slot còn hiệu lực, chỉ đánh dấu hết hạn khi timeline câu thực sự kết thúc, tính playback rate theo phần thời gian còn lại và chỉ dừng audio vượt `endMs` khi câu kế tiếp đã có audio sẵn sàng; nếu chưa có thì câu hiện tại vẫn được nói hết.
-- Batch đầu tiên được tạo đầy đủ trong lúc video tạm dừng; chỉ sau khi toàn batch đã có audio video mới tiếp tục. Bộ đệm các batch sau vẫn chạy song song như trước.
-- File sửa: `src/extension/audio/scheduler.ts`, `src/extension/content.ts`, `tests/scheduler.test.ts`, `STATUS.md`.
-- Kiểm tra: `npm run check` đạt; 27/27 test đạt; production build đạt và `content.js` vẫn standalone.
-- Giới hạn còn lại: câu không có trong Translation Memory mà cả Groq lẫn dịch offline đều không tạo được bản dịch vẫn không thể phát tiếng Việt; trường hợp này khác với scheduler bỏ nhầm audio đã chuẩn bị.
+Tất cả tính năng cốt lõi hoạt động. Free, không cần API key trả phí cho TTS.
