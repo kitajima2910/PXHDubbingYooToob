@@ -53,6 +53,10 @@ async function cachePost<T>(body: unknown, signal?: AbortSignal): Promise<T | un
   }
 }
 
+// Session-level flags — tránh thử lại các provider đã biết là không hoạt động
+let groqDefinitelyDown = false;
+let braveTranslatorBroken = false;
+
 export async function translateSegments(segments: SubtitleSegment[], signal?: AbortSignal, cache?: CacheContext): Promise<SubtitleSegment[]> {
   const requested = segments.map(({ id, sourceText }) => ({ id, sourceText }));
   const cached = cache ? await cachePost<{ segments?: Array<{ id: string; translatedText: string }> }>({
@@ -62,7 +66,7 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
   const missing = segments.filter((segment) => !cachedById.has(segment.id));
   let translatedMissing: SubtitleSegment[] = [];
   if (missing.length) {
-    let cloudUnavailable = false;
+    let cloudUnavailable = groqDefinitelyDown;
     const cloud = await runAdaptiveBatchSettled(missing, async (batch) => {
       if (cloudUnavailable) throw new Error("Groq đang tạm không khả dụng");
       try {
@@ -76,51 +80,29 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
         }
         return mapTranslations(batch, result.segments);
       } catch (error) {
-        if (batch.length === 1) cloudUnavailable = true;
+        if (batch.length === 1) { cloudUnavailable = true; groqDefinitelyDown = true; }
         throw error;
       }
     });
-    if (signal?.aborted) throw new DOMException("Đã hủy dịch", "AbortError");
+    if (signal?.aborted) return [];
     translatedMissing = cloud.results;
     if (cloud.failed.length) {
-      let localDone = false;
-      try {
-        const local = await translateWithBrowser(cloud.failed);
-        translatedMissing.push(...local);
-        localDone = true;
-        console.info("PXHDubbingYooToob: Groq không khả dụng, đang dùng Translator API trên máy");
-      } catch (localError) {
-        const localMessage = localError instanceof Error ? localError.message : "dịch trên máy không khả dụng";
-        console.info(`PXHDubbingYooToob: Translator API không khả dụng (${localMessage})`);
-      }
-      if (!localDone && cloud.failed.length) {
-        // Cooldown retry: đợi Groq rate-limit reset rồi thử lại
-        if (cloud.failed.length <= 3) {
-          console.info(`PXHDubbingYooToob: đợi 12s rồi thử lại ${cloud.failed.length} câu qua Groq...`);
-          if (!signal?.aborted) await new Promise((r) => setTimeout(r, 12_000));
-          if (signal?.aborted) return [];
-          for (const segment of [...cloud.failed]) {
-            if (signal?.aborted) break;
-            try {
-              const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
-                segments: [{ id: segment.id, sourceText: segment.sourceText }], sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
-              }, signal);
-              if (result.segments.length === 1 && result.segments[0]?.translatedText) {
-                translatedMissing.push({ ...segment, translatedText: result.segments[0].translatedText });
-              }
-            } catch { /* vẫn lỗi sau cooldown */ }
-          }
-        }
-        // Final fallback: Google Translate (free, không giới hạn)
-        const stillFailed = cloud.failed.filter(s => !translatedMissing.some(t => t.id === s.id));
-        if (stillFailed.length) {
-          console.info(`PXHDubbingYooToob: thử Google Translate cho ${stillFailed.length} câu...`);
-          const googleTranslated = await translateWithGoogleFallback(stillFailed, signal);
-          translatedMissing.push(...googleTranslated);
+      // Translator API — chỉ thử 1 lần mỗi session
+      if (!braveTranslatorBroken) {
+        try {
+          const local = await translateWithBrowser(cloud.failed);
+          translatedMissing.push(...local);
+        } catch {
+          braveTranslatorBroken = true;
+          console.info("PXHDubbingYooToob: Translator API không khả dụng, dùng Google Translate");
         }
       }
-      if (cloud.failed.length > translatedMissing.filter(s => cloud.failed.some(f => f.id === s.id)).length) {
-        console.warn(`PXHDubbingYooToob: bỏ qua ${cloud.failed.length} câu không dịch được, tiếp tục theo dõi`);
+      // Google Translate: nhanh, free, không cần chờ cooldown
+      const stillFailed = cloud.failed.filter(s => !translatedMissing.some(t => t.id === s.id));
+      if (stillFailed.length) {
+        console.info(`PXHDubbingYooToob: Google Translate ${stillFailed.length} câu...`);
+        const googleTranslated = await translateWithGoogleFallback(stillFailed, signal);
+        translatedMissing.push(...googleTranslated);
       }
     }
     if (cache) void cachePost({
