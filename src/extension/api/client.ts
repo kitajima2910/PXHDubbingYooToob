@@ -1,6 +1,26 @@
 import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
 import { translateWithBrowser } from "../translation/browser-translator";
+
+async function googleTranslate(text: string, signal?: AbortSignal): Promise<string> {
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=vi&dt=t&q=${encodeURIComponent(text)}`;
+  const response = await fetch(url, { signal: signal ?? null });
+  if (!response.ok) throw new Error(`Google Translate HTTP ${response.status}`);
+  const data = await response.json() as [[string, string, null, null, number][]];
+  const translation = data[0]?.map((item) => item[0]).join("")?.trim();
+  if (!translation) throw new Error("Google Translate trả kết quả rỗng");
+  return translation;
+}
+
+async function translateWithGoogleFallback(segments: SubtitleSegment[], signal?: AbortSignal): Promise<SubtitleSegment[]> {
+  const results: SubtitleSegment[] = [];
+  for (const segment of segments) {
+    try {
+      results.push({ ...segment, translatedText: await googleTranslate(segment.sourceText, signal) });
+    } catch { /* bỏ qua câu lỗi */ }
+  }
+  return results;
+}
 import { runAdaptiveBatchSettled } from "../translation/adaptive-batch";
 import { audioCacheKey, getCachedAudio, setCachedAudio } from "../audio/audio-cache";
 
@@ -73,20 +93,30 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
         const localMessage = localError instanceof Error ? localError.message : "dịch trên máy không khả dụng";
         console.info(`PXHDubbingYooToob: Translator API không khả dụng (${localMessage})`);
       }
-      if (!localDone && cloud.failed.length <= 3) {
-        // Cooldown retry: đợi Groq rate-limit reset rồi thử lại từng câu
-        console.info(`PXHDubbingYooToob: đợi 12s rồi thử lại ${cloud.failed.length} câu qua Groq...`);
-        if (!signal?.aborted) await new Promise((r) => setTimeout(r, 12_000));
-        if (signal?.aborted) return [];
-        for (const segment of cloud.failed) {
-          try {
-            const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
-              segments: [{ id: segment.id, sourceText: segment.sourceText }], sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
-            }, signal);
-            if (result.segments.length === 1 && result.segments[0]?.translatedText) {
-              translatedMissing.push({ ...segment, translatedText: result.segments[0].translatedText });
-            }
-          } catch { /* vẫn lỗi sau cooldown — thực sự không dịch được */ }
+      if (!localDone && cloud.failed.length) {
+        // Cooldown retry: đợi Groq rate-limit reset rồi thử lại
+        if (cloud.failed.length <= 3) {
+          console.info(`PXHDubbingYooToob: đợi 12s rồi thử lại ${cloud.failed.length} câu qua Groq...`);
+          if (!signal?.aborted) await new Promise((r) => setTimeout(r, 12_000));
+          if (signal?.aborted) return [];
+          for (const segment of [...cloud.failed]) {
+            if (signal?.aborted) break;
+            try {
+              const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
+                segments: [{ id: segment.id, sourceText: segment.sourceText }], sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
+              }, signal);
+              if (result.segments.length === 1 && result.segments[0]?.translatedText) {
+                translatedMissing.push({ ...segment, translatedText: result.segments[0].translatedText });
+              }
+            } catch { /* vẫn lỗi sau cooldown */ }
+          }
+        }
+        // Final fallback: Google Translate (free, không giới hạn)
+        const stillFailed = cloud.failed.filter(s => !translatedMissing.some(t => t.id === s.id));
+        if (stillFailed.length) {
+          console.info(`PXHDubbingYooToob: thử Google Translate cho ${stillFailed.length} câu...`);
+          const googleTranslated = await translateWithGoogleFallback(stillFailed, signal);
+          translatedMissing.push(...googleTranslated);
         }
       }
       if (cloud.failed.length > translatedMissing.filter(s => cloud.failed.some(f => f.id === s.id)).length) {
