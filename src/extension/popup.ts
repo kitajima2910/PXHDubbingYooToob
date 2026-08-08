@@ -338,14 +338,19 @@ summaryBtn.addEventListener("click", async () => {
   }
 
   try {
-    let summary: string;
-    try {
-      summary = await doSummary();
-    } catch (firstError) {
-      // Retry once after 1s (cold start Neon/Vercel)
-      await new Promise((r) => setTimeout(r, 1000));
-      summary = await doSummary();
+    let summary = "";
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        summary = await doSummary();
+        lastError = undefined;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); // 1s, 2s
+      }
     }
+    if (lastError) throw lastError;
     summaryResult.style.display = "block";
     summaryResult.textContent = summary;
   } catch (error) {
