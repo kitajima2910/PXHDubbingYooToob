@@ -28,6 +28,7 @@ let whisperInitialPauseDone = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let seekVersion = 0;
+let scheduledEndMs = 0;
 let trainingRecorder: MediaRecorder | undefined;
 let trainingStream: MediaStream | undefined;
 let trainingKeepAlivePort: chrome.runtime.Port | undefined;
@@ -180,7 +181,7 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
     if (seekVersion !== versionAtStart) break; // seek happened, abandon stale batch
     // Dịch/cache theo từng caption gốc để tiếp tục tận dụng Translation Memory,
     // sau đó mới ghép thành cụm nói dài hơn cho TTS tự nhiên.
-    const speechSegments = mergeOverlappingSegments(translated);
+    const speechSegments = mergeOverlappingSegments(translated).filter((seg) => seg.startMs >= scheduledEndMs - 250);
     update({ status: "speaking", message: state.processedSegments ? "Đang tạo bộ đệm" : "Đang tạo giọng nói" });
     let nextIndex = 0;
     const prepare = async (segment: SubtitleSegment): Promise<void> => {
@@ -427,6 +428,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
+  scheduledEndMs = 0;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });

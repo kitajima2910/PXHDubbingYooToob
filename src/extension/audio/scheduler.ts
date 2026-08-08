@@ -1,4 +1,4 @@
-import type { SubtitleSegment } from "../../shared/types";
+﻿import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
 const MIN_SMOOTH_RATE = 0.95;
@@ -71,9 +71,22 @@ export class AudioScheduler {
         }
       }
       const activeSegment = this.active ? this.items.get(this.active.id)?.segment : undefined;
-      const replacementReady = [...this.items.values()].some(({ segment }) =>
-        segment.id !== activeSegment?.id && !this.played.has(segment.id) && canStartSpeechAt(segment, now));
-      if (activeSegment && now >= activeSegment.endMs && replacementReady) this.stopActive();
+
+      // Tìm segment tiếp theo sẵn sàng phát (kể cả khi đang có active)
+      const nextCandidate = activeSegment ? [...this.items.values()]
+        .filter(({ segment }) => segment.id !== activeSegment.id
+          && !this.played.has(segment.id)
+          && canStartSpeechAt(segment, now))
+        .sort((left, right) => left.segment.startMs - right.segment.startMs)[0] : undefined;
+
+      // Proactive stop: nếu segment tiếp theo overlap với segment đang chạy
+      if (activeSegment && nextCandidate) {
+        if (now >= activeSegment.endMs || nextCandidate.segment.startMs < activeSegment.endMs) {
+          this.stopActive();
+        }
+      }
+
+      // Standard match khi không có active
       const match = !this.active ? [...this.items.values()]
         .filter(({ segment }) => canStartSpeechAt(segment, now)
           && !this.played.has(segment.id))
@@ -87,7 +100,7 @@ export class AudioScheduler {
 
   private play(item: ScheduledAudio): void {
     this.stopActive();
-    // At-most-once trong một timeline: nếu play/resume lỗi, tick sau không được phát lại từ đầu.
+    // At-most-once trong mot timeline: neu play/resume loi, tick sau khong duoc phat lai tu dau.
     this.played.add(item.segment.id);
     const slotDuration = Math.max(500, item.segment.endMs - item.segment.startMs);
     const latenessMs = Math.max(0, this.video.currentTime * 1000 - item.segment.startMs);
@@ -100,7 +113,7 @@ export class AudioScheduler {
       void chrome.runtime.sendMessage({ action: "tts-speak", text: item.text, rate }).then(async (result: { ok?: boolean; message?: string }) => {
         if (this.active?.id !== item.segment.id) return;
         if (result?.ok) { this.finishActive(); return; }
-        // Fallback: Web Speech API (client-side, không cần server)
+        // Fallback: Web Speech API (client-side, khong can server)
         if (this.webSpeechFallback) {
           try {
             await this.webSpeechFallback(item.text!, rate);
@@ -108,7 +121,7 @@ export class AudioScheduler {
             return;
           } catch { /* continue to createFallbackSpeech */ }
         }
-        if (!this.createFallbackSpeech) { console.warn("PXHDubbingYooToob: Chrome TTS lỗi", result?.message); this.stopActive(); return; }
+        if (!this.createFallbackSpeech) { console.warn("PXHDubbingYooToob: Chrome TTS loi", result?.message); this.stopActive(); return; }
         this.active = { id: item.segment.id };
         try {
           const blob = await this.createFallbackSpeech(item.segment, item.text!);
@@ -119,7 +132,7 @@ export class AudioScheduler {
           this.played.delete(item.segment.id);
           if (!this.video.paused && canStartSpeechAt(item.segment, this.video.currentTime * 1000)) this.play(fallback);
         } catch (error) {
-          console.warn("PXHDubbingYooToob: TTS dự phòng lỗi", error);
+          console.warn("PXHDubbingYooToob: TTS du phong loi", error);
           if (this.active?.id === item.segment.id) this.stopActive();
         }
       }, () => { if (this.active?.id === item.segment.id) this.stopActive(); });

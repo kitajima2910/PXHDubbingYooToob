@@ -1,4 +1,4 @@
-﻿# PXHDubbingYooToob
+# PXHDubbingYooToob
 
 Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.
 
@@ -20,7 +20,7 @@ Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory (e
 - Dubbing lock: chặn 2 tab chạy cùng video. Content script tự phục hồi sau reload.
 - Chống audio feedback. Tab ẩn → pause. Chuyển app → pause.
 
-178/178 test pass, TypeScript strict pass, production build pass. Xem [STATUS.md](./STATUS.md).
+53/53 test pass, TypeScript strict pass, production build pass. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
@@ -64,7 +64,7 @@ Endpoint cache tự tạo bảng theo `migrations/`.
 | Lệnh | Mô tả |
 |------|-------|
 | `npm run check` | TypeScript strict (extension + backend) |
-| `npm test` | 178 unit tests (Vitest) |
+| `npm test` | 53 unit tests (Vitest) |
 | `npm run build` | Production build → `dist/` |
 | `npm run dev:api` | Backend local (không cần Vercel CLI) |
 

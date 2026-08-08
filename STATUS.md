@@ -1,4 +1,4 @@
-﻿# Trạng thái PXHDubbingYooToob — 2026-08-08
+# Trạng thái PXHDubbingYooToob — 2026-08-08
 
 ## P0 Hoàn thiện (2026-08-08)
 
@@ -39,7 +39,7 @@ Viết lại toàn bộ — phản ánh đúng pipeline, tính năng, giới h�
 |-------|---------|
 | `npm run check` | ✅ Pass |
 | `npm run build` | ✅ Pass (7 output files, content.js standalone) |
-| `npm test` (unit) | ✅ 177/177 project tests pass |
+| `npm test` (unit) | ✅ 53/53 project tests pass |
 | `npm run test:e2e` (production) | ✅ 4/5 pass (health endpoint cần deploy) |
 
 ## Status hiện tại

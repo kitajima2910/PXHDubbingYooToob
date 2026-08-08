@@ -1,15 +1,17 @@
 {
   "name": "pxh-dubbing-yootob",
-  "version": "0.1.0",
+  "version": "0.1.98",
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/version.mjs",
     "build": "vite build && tsc -p tsconfig.api.json --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "dev": "vite",
     "dev:api": "tsx scripts/local-api.ts",
     "migrate:global-translations": "tsx scripts/migrate-global-translations.ts",
+    "version": "node scripts/version.mjs",
     "check": "tsc --noEmit && tsc -p tsconfig.api.json --noEmit"
   },
   "dependencies": {
