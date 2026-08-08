@@ -1,10 +1,27 @@
-# PXHDubbingYooToob
+﻿# PXHDubbingYooToob
 
 Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.
 
 ## Trạng thái
 
-Bản hiện tại ưu tiên transcript DOM → cache Neon → Translation Memory exact/canonical/gold → Groq dịch cache miss → Chrome TTS theo timestamp. Transcript vẫn lưu theo video; bản dịch dùng chung giữa mọi video theo ngôn ngữ, hash câu và phiên bản dịch. Canonical key tái sử dụng an toàn khi chỉ khác kiểu chữ, Unicode, khoảng trắng hoặc dấu câu cuối; bản dịch `gold` không bị job train ghi đè. Video không có transcript dùng Groq Whisper theo chunk 5 giây. Xem [STATUS.md](./STATUS.md).
+Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory (exact/canonical/gold) → Groq dịch → Edge TTS / Chrome TTS / Web Speech → phát đồng bộ`.
+
+**Tính năng cốt lõi đã hoàn thiện:**
+- Transcript ưu tiên DOM MAIN-world, fallback qua timedtext, Neon cache, và Groq Whisper (5s chunk).
+- Translation Memory 3 tầng (exact hash → canonical → quality tiers: machine/reviewed/gold) — dùng chung cross-video.
+- Bộ đệm liên tục 60 giây, tự bổ sung cho video dài bất kỳ.
+- Scheduler at-most-once, smooth rate (0.95–1.35), catch-up (max +20%), proactive replacement.
+- Cache audio IndexedDB (hash giọng/tốc độ/text) — replay không gọi lại TTS.
+- BYOK Groq: key riêng + auto-failover về backend. Cooldown sau 429.
+- Subtitle Editor: sửa bản dịch → quality `reviewed`, dùng lại cho mọi video.
+- Voice selection: Nam Minh (nam) / Hoài My (nữ).
+- Fallback đa tầng: Edge TTS → Chrome TTS → Web Speech API → bỏ qua câu lỗi.
+- Dịch batch thích ứng (batch → nhỏ dần → từng câu → Chrome Translator API offline).
+- Dubbing lock: chặn 2 tab chạy cùng video. Content script tự phục hồi sau reload extension.
+- Chống audio feedback (fingerprint TTS, chặn Whisper nhận lại giọng dubbing).
+- Tab ẩn → pause dubbing; chuyển app → pause.
+
+178/178 test pass, TypeScript strict pass, production build pass. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
@@ -13,46 +30,48 @@ Bản hiện tại ưu tiên transcript DOM → cache Neon → Translation Memor
 - `src/shared`: kiểu và tiện ích dùng chung.
 - `api`: entrypoint cho Vercel.
 - `migrations`: schema SQL cho cache transcript/bản dịch trên Neon.
-- `tests`: kiểm thử đơn vị.
+- `tests`: 10 file, 178 test đơn vị.
 
-API key chỉ tồn tại trong biến môi trường backend. Extension không kết nối Groq hoặc cơ sở dữ liệu trực tiếp và không lưu MP3 trên server.
+API key chỉ tồn tại trong biến môi trường backend. Extension không lưu MP3 trên server.
 
 ## Chạy local
 
 Yêu cầu Node.js 20 trở lên.
 
-1. Chạy `npm install`.
-2. Sao chép `.env.example` thành `.env.local`, điền `GROQ_API_KEY`, `DATABASE_URL` cho transcript và `DUBBING_DATABASE_URL` cho kho dịch global; giữ file này ngoài Git.
-3. Chạy `npm run dev:api` để chạy API local tại `http://localhost:3000`; lệnh này không yêu cầu đăng nhập Vercel.
-4. Ở terminal khác, chạy `npm run dev` khi phát triển hoặc `npm run build` để tạo extension trong `dist`.
-5. Mở `chrome://extensions`, bật **Chế độ dành cho nhà phát triển**, chọn **Tải tiện ích đã giải nén** và chọn thư mục `dist`.
-6. Mở hoặc tải lại trang xem YouTube, sau đó bấm biểu tượng **PXHDubbingYooToob** và chọn **Bắt đầu lồng tiếng**.
+1. `npm install`
+2. Sao chép `.env.example` → `.env.local`, điền `GROQ_API_KEY`, `DATABASE_URL`, `DUBBING_DATABASE_URL`
+3. `npm run dev:api` — API local tại `http://localhost:3000`
+4. `npm run build` — tạo extension trong `dist/`
+5. Mở `chrome://extensions` → **Tải tiện ích đã giải nén** → chọn `dist/`
+6. Mở video YouTube → bấm icon extension → **Bắt đầu lồng tiếng**
 
 ## Triển khai Vercel
 
 1. Import repository vào Vercel.
-2. Thêm `GROQ_API_KEY`, `GROQ_TRANSLATION_MODEL`, `DATABASE_URL`, `DUBBING_DATABASE_URL`, `TRANSLATION_CACHE_VERSION` và `EXTENSION_ORIGIN` trong Project Settings → Environment Variables.
-3. Deploy, rồi build extension với `VITE_API_BASE_URL=https://ten-du-an.vercel.app`.
-4. Để cấp quyền tối thiểu khi phát hành, thay mẫu `https://*.vercel.app/*` trong `public/manifest.json` bằng đúng tên miền backend rồi build lại.
-5. Sau khi Chrome cấp ID extension, đặt `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại backend.
+2. Thêm env vars: `GROQ_API_KEY`, `GROQ_TRANSLATION_MODEL`, `DATABASE_URL`, `DUBBING_DATABASE_URL`, `TRANSLATION_CACHE_VERSION`, `EXTENSION_ORIGIN`.
+3. Deploy → build với `VITE_API_BASE_URL=https://ten-du-an.vercel.app`.
+4. Sau khi Chrome cấp ID extension, set `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại.
 
-Endpoint cache tự tạo bảng bằng schema tương đương `migrations/001_neon_cache.sql`, `migrations/002_global_translation_memory.sql` và `migrations/003_multilayer_translation_memory.sql`. Dùng `npm run migrate:global-translations` để chuyển bản dịch từ cache theo video cũ sang project global mà không xóa dữ liệu nguồn. Translation Memory lưu thêm `quality` (`machine`, `reviewed`, `gold`), `usage_count` và `last_used_at`; chỉ nâng một bản dịch thành `gold` sau khi đã kiểm duyệt nội dung.
+Endpoint cache tự tạo bảng theo `migrations/`. Dùng `npm run migrate:global-translations` để chuyển dữ liệu cũ.
 
 ## Kiểm tra
 
-- `npm run check`: kiểm tra TypeScript strict cho extension và backend.
-- `npm test`: kiểm thử retry, chia batch và ánh xạ bản dịch.
-- `npm run build`: tạo gói extension và kiểm tra kiểu backend.
-- `npm run dev:api`: chạy các endpoint backend local từ `.env.local`, không cần Vercel CLI.
+| Lệnh | Mô tả |
+|------|-------|
+| `npm run check` | TypeScript strict (extension + backend) |
+| `npm test` | 178 unit tests (Vitest) |
+| `npm run build` | Production build → `dist/` |
+| `npm run dev:api` | Backend local (không cần Vercel CLI) |
 
-Kiểm thử thủ công Bước 1 cần `GROQ_API_KEY`, backend đang chạy và một video YouTube có phụ đề. Khi API hoặc TTS lỗi, video gốc tiếp tục phát; extension hiện lỗi hoặc bỏ qua riêng câu TTS lỗi.
-
-Nếu WEB timedtext của YouTube trả rỗng do yêu cầu PO token, extension tự gọi `/api/subtitles/youtube` bằng `videoId` và cửa sổ thời gian đang phát. Backend không nhận URL tùy ý.
+Khi API/TTS lỗi, video gốc tiếp tục phát; extension bỏ qua riêng câu lỗi.
 
 ## Giới hạn hiện tại
 
-- Đọc phụ đề dựa trên `ytInitialPlayerResponse`; thay đổi nội bộ của YouTube có thể cần cập nhật parser.
-- Bước 1 chỉ chuẩn bị cửa sổ đầu tiên tối đa 40 câu, chưa tự bổ sung liên tục cho video dài.
-- Cache Neon là tùy chọn và tự bỏ qua khi chưa có `DATABASE_URL`; cache audio IndexedDB chưa được triển khai.
-- Rate limit hiện lưu trong bộ nhớ từng Vercel instance; cần kho chia sẻ ở bước backend hoàn chỉnh.
-- Edge TTS là dịch vụ không chính thức, nên có thể thay đổi hoặc gián đoạn.
+- **Parser phụ thuộc DOM YouTube** (`ytInitialPlayerResponse`, `transcript-segment-view-model`) — có thể cần cập nhật khi YouTube thay đổi.
+- **Rate limit in-memory** — không chia sẻ giữa nhiều Vercel instance. Cần Redis/Upstash cho production.
+- **Chưa có xác thực người dùng/quota** — CORS extension origin là biện pháp tạm thời.
+- **`msedge-tts` là client không chính thức** — sẽ thay bằng Azure Cognitive Services TTS chính thức.
+- **Playback rate**: đồng bộ tốt ở 0.5x–1.5x; >1.5x có thể lệch.
+- **Chưa có**: nhận dạng nhiều người nói (diarization), tách giọng khỏi nhạc nền.
+- **Chưa có Chrome E2E test** — cần thêm Playwright/Puppeteer test extension trên YouTube thật.
+- **npm audit**: 10 advisory (3 moderate, 7 high) từ transitive dependencies của `@vercel/node` — đang xử lý upgrade lên v4.
