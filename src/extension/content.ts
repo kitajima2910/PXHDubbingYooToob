@@ -388,7 +388,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
           // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
           await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
           scheduler.start();
-          console.info("PXHDubbingYooToob: chuyển sang Whisper", bridgeError, backendError);
+          const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript"; console.info(`PXHDubbingYooToob: chuyen sang Whisper (${reason})`);
           whisperMode = true;
           update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
           await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);

@@ -8,7 +8,7 @@ const root = resolve(__dirname, "..");
 
 // Dem tong so commit, tinh minor tu dong: moi 100 commit = +1 minor
 const totalCommits = parseInt(execSync("git rev-list --count HEAD", { encoding: "utf8", cwd: root }).trim(), 10);
-const minor = Math.floor((totalCommits - 1) / 100) + 1;
+const minor = Math.floor(totalCommits / 100) + 1;
 const patch = totalCommits % 100;
 const newVersion = `0.${minor}.${patch}`;
 
