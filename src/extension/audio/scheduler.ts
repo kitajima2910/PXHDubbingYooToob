@@ -2,8 +2,8 @@ import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
 const MIN_SMOOTH_RATE = 0.95;
-const MAX_SMOOTH_RATE = 1.25;
-const MAX_PLAYBACK_RATE = 1.35;
+const MAX_SMOOTH_RATE = 1.35;
+const MAX_PLAYBACK_RATE = 1.5;
 
 export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs: number, videoRate: number): number {
   const naturalRate = !Number.isFinite(audioDurationSeconds) || audioDurationSeconds <= 0
@@ -14,7 +14,7 @@ export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs:
 }
 
 export function speechCatchupRate(latenessMs: number): number {
-  return 1 + Math.min(0.1, Math.max(0, latenessMs) / 40_000);
+  return 1 + Math.min(0.2, Math.max(0, latenessMs) / 40_000);
 }
 
 export function canStartSpeechAt(segment: SubtitleSegment, timelineMs: number): boolean {
@@ -72,7 +72,10 @@ export class AudioScheduler {
       const activeSegment = this.active ? this.items.get(this.active.id)?.segment : undefined;
       const replacementReady = [...this.items.values()].some(({ segment }) =>
         segment.id !== activeSegment?.id && !this.played.has(segment.id) && canStartSpeechAt(segment, now));
-      if (activeSegment && now >= activeSegment.endMs && replacementReady) this.stopActive();
+      const activeElapsed = activeSegment ? now - activeSegment.startMs : 0;
+      const activeSlot = activeSegment ? activeSegment.endMs - activeSegment.startMs : 0;
+      const activePastSeventy = activeSlot > 0 && activeElapsed > activeSlot * 0.7;
+      if (activeSegment && (now >= activeSegment.endMs || activePastSeventy) && replacementReady) this.stopActive();
       const match = !this.active ? [...this.items.values()]
         .filter(({ segment }) => canStartSpeechAt(segment, now)
           && !this.played.has(segment.id))

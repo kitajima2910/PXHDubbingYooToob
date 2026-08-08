@@ -155,6 +155,10 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
     // This is best-effort and never blocks the normal Groq/cache path.
     void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
+    if (!capture?.ok && capture?.message) {
+      // Lock error or permission error — show immediately.
+      throw new Error(capture.message);
+    }
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
     if (result.source.startsWith("Whisper") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);

@@ -223,12 +223,13 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     return;
   }
   const chunkId = whisperChunkIndex++;
-  const desiredStartMs = capturedStartMs + whisperDelaySeconds * 1000;
+  const effectiveDelay = video ? Math.max(2, whisperDelaySeconds / video.playbackRate) : whisperDelaySeconds;
+  const desiredStartMs = capturedStartMs + effectiveDelay * 1000;
   const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
   const segments = fromCache ? sourceSegments.map((segment, index) => ({
     ...segment, id: `cache-${chunkId}-${index}`,
-    startMs: Math.max(anchorMs, segment.startMs + whisperDelaySeconds * 1000),
-    endMs: Math.max(anchorMs + 500, segment.endMs + whisperDelaySeconds * 1000),
+    startMs: Math.max(anchorMs, segment.startMs + effectiveDelay * 1000),
+    endMs: Math.max(anchorMs + 500, segment.endMs + effectiveDelay * 1000),
   })) : sourceSegments.map((segment, index) => ({
     ...segment, id: `whisper-${chunkId}-${index}`,
     startMs: anchorMs + segment.startMs,
@@ -237,8 +238,8 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   if (!fromCache) {
     const transcriptSegments = segments.map((segment) => ({
       ...segment,
-      startMs: segment.startMs - whisperDelaySeconds * 1000,
-      endMs: segment.endMs - whisperDelaySeconds * 1000,
+      startMs: segment.startMs - effectiveDelay * 1000,
+      endMs: segment.endMs - effectiveDelay * 1000,
     }));
     await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal, {
       fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
