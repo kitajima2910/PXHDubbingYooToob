@@ -5,13 +5,6 @@ const API_URL = process.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 // Chạy `npm run dev:api` ở terminal khác trước khi chạy test này.
 // Hoặc set VITE_API_BASE_URL=https://pxh-dubbing-yoo-toob.vercel.app để test production.
 
-async function ensureServer( request: ReturnType<typeof test["info"]> extends never ? never : Parameters<Parameters<typeof test>[1]>[0]["request"] ): Promise<boolean> {
-  try {
-    const r = await (request as any).get(`${API_URL}/api/health`, { timeout: 2000 });
-    return r.ok();
-  } catch { return false; }
-}
-
 test.describe("PXHDubbingYooToob API E2E", () => {
 
   test("GET /api/health returns ok", async ({ request }) => {
