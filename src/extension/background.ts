@@ -14,40 +14,6 @@ let playlistTrainingController: AbortController | undefined;
 let playlistTrainingTabId: number | undefined;
 let playlistTrainingWindowId: number | undefined;
 
-// ── Dubbing lock: prevent duplicate processing of the same video ──
-let activeDubbing: { videoId: string; tabId: number; startedAt: number } | undefined;
-
-async function acquireDubbingLock(videoId: string, tabId: number): Promise<{ ok: boolean; message?: string }> {
-  if (activeDubbing) {
-    try {
-      const tab = await chrome.tabs.get(activeDubbing.tabId);
-      if (!tab || !tab.url?.includes("youtube.com/watch")) {
-        activeDubbing = undefined;
-      }
-    } catch {
-      activeDubbing = undefined;
-    }
-  }
-  if (activeDubbing && activeDubbing.videoId === videoId && activeDubbing.tabId !== tabId) {
-    return { ok: false, message: "Video này đang được lồng tiếng ở tab khác" };
-  }
-  activeDubbing = { videoId, tabId, startedAt: Date.now() };
-  return { ok: true };
-}
-
-function releaseDubbingLock(tabId: number): void {
-  if (activeDubbing?.tabId === tabId) activeDubbing = undefined;
-}
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (activeDubbing?.tabId === tabId) activeDubbing = undefined;
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (activeDubbing?.tabId === tabId && changeInfo.url && !changeInfo.url.includes("youtube.com/watch")) {
-    activeDubbing = undefined;
-  }
-});
 let trainingAudioCapture: { tabId: number; chunks: TrainingAudioChunk[]; notify: (() => void) | undefined } | undefined;
 
 async function resetInterruptedTraining(): Promise<void> {
@@ -557,26 +523,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (request?.action === "capture-start") {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
-    // Acquire dubbing lock: reject if the same video is already being processed in another tab.
-    void (async () => {
-      let videoId = "";
-      try {
-        const tab = await chrome.tabs.get(targetTabId);
-        const url = tab?.url ?? tab?.pendingUrl ?? "";
-        videoId = new URL(url).searchParams.get("v") ?? "";
-      } catch { /* Tab not accessible — let capture proceed. */ }
-      if (videoId) {
-        const lock = await acquireDubbingLock(videoId, targetTabId);
-        if (!lock.ok) { respond({ ok: false, message: lock.message }); return; }
-      }
-      const sourceVolume = request.sourceVolume ?? 0.08;
-      void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
-    })();
+    const sourceVolume = request.sourceVolume ?? 0.08;
+    void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
   if (request?.action === "capture-stop") {
-    const tabId = sender.tab?.id ?? request.tabId;
-    if (tabId !== undefined) releaseDubbingLock(tabId);
     void stopTabCapture().then(() => respond({ ok: true }));
     return true;
   }

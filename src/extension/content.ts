@@ -240,7 +240,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     return;
   }
   const chunkId = whisperChunkIndex++;
-  const effectiveDelay = video ? Math.max(2, whisperDelaySeconds / video.playbackRate) : whisperDelaySeconds;
+  const effectiveDelay = whisperDelaySeconds;
   const desiredStartMs = capturedStartMs + effectiveDelay * 1000;
   const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
   const segments = fromCache ? sourceSegments.map((segment, index) => ({
