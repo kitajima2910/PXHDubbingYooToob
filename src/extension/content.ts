@@ -224,9 +224,10 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   if (!fromCache) {
     const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
     if (signal.aborted) return;
-    const vietnameseFeedback = /^(?:vi|vie|vietnamese|tiếng việt)$/i.test(result.language?.trim() ?? "")
-      && recentDubbingTexts.length > 0;
-    sourceSegments = vietnameseFeedback ? [] : result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+    // Không loại cả chunk chỉ vì Whisper nhận diện ngôn ngữ là tiếng Việt:
+    // một chunk có thể chứa đồng thời tiếng gốc và một phần TTS thu ngược.
+    // Chỉ loại đúng segment trùng với nội dung dubbing đã phát.
+    sourceSegments = result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
   }
   if (!sourceSegments.length) {
     if (!fromCache) {
@@ -267,7 +268,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   update({ status: "translating", message: "Đang dịch giọng nói" });
   const translated = await translateForVideo(segments, signal);
   update({ status: "speaking", message: "Đang tạo giọng nói" });
-  await Promise.all(translated.map(async (segment) => {
+  const prepare = async (segment: SubtitleSegment): Promise<void> => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
     await addPreparedSpeech(segment, signal);
     rememberDubbingText(dubbingText);
@@ -276,7 +277,12 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
       resumeAfterWhisperWarmup = false;
       void video.play().catch(() => undefined);
     }
-  }));
+  };
+  // Câu đầu phải vào scheduler trước. Nếu tạo tất cả TTS song song, câu sau có
+  // thể hoàn thành trước và phát trước, làm câu đầu hết slot rồi bị bỏ.
+  const [first, ...remaining] = translated;
+  if (first) await prepare(first);
+  await Promise.all(remaining.map(prepare));
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
 }
 
@@ -390,7 +396,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
           scheduler.start();
           const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript"; console.info(`PXHDubbingYooToob: chuyen sang Whisper (${reason})`);
           whisperMode = true;
-          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — trễ khoảng 5–8 giây" });
+          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — bộ đệm khoảng 10 giây" });
           await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
           if (resumeWhenReady) void video.play().catch(() => undefined);
           return state;

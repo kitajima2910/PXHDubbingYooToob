@@ -47,3 +47,25 @@ Viết lại toàn bộ — phản ánh đúng pipeline, tính năng, giới h�
 Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory → Groq dịch → Edge TTS / Chrome TTS / Web Speech → phát đồng bộ`.
 
 Tất cả tính năng cốt lõi hoạt động. Free, không cần API key trả phí cho TTS.
+
+## Fix dubbing video không có transcript DOM — 2026-08-08
+
+### Đã thay đổi
+- Không còn loại toàn bộ chunk Whisper khi mô hình nhận diện tiếng Việt; chỉ bỏ segment thực sự trùng nội dung TTS đã phát.
+- Bảo đảm câu đầu trong mỗi chunk được đưa vào scheduler trước, tránh câu sau hoàn thành TTS sớm và làm câu trước hết thời gian phát.
+- Tăng cửa sổ thu Whisper từ 5 lên 10 giây để có thêm ngữ cảnh và giảm mất câu ở biên audio.
+- Cho phép mọi giọng Chrome TTS tiếng Việt trong Whisper mode, vẫn ưu tiên Nam Minh/giọng nam, nhằm tránh MP3 dubbing bị thu ngược vào tab khi máy có giọng Việt khác.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `src/extension/background.ts`
+- `src/extension/offscreen.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 53/53 test pass.
+- `npx.cmd vite build` và API TypeScript check: pass; build không chạy script tự tăng version.
+
+### Vấn đề còn lại
+- Chưa thể chạy thử trực tiếp trên một video YouTube không có transcript DOM trong phiên terminal; cần reload extension và kiểm tra thực tế trên trình duyệt để đánh giá chất lượng nhận dạng của Whisper theo nội dung/âm thanh video.

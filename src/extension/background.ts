@@ -541,26 +541,19 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return true;
   }
   if (request?.action === "tts-status") {
-    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) => {
-      const name = voice.voiceName?.toLocaleLowerCase() ?? "";
-      return voice.lang?.toLocaleLowerCase().startsWith("vi") === true
-        && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
-    }) }));
+    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) =>
+      voice.lang?.toLocaleLowerCase().startsWith("vi") === true) }));
     return true;
   }
   if (request?.action === "tts-speak" && request.text) {
     chrome.tts.getVoices((voices) => {
-      const vietnamese = voices.filter((item) => {
-        const name = item.voiceName?.toLocaleLowerCase() ?? "";
-        return item.lang?.toLocaleLowerCase().startsWith("vi") === true
-          && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
-      }).sort((left, right) => {
+      const vietnamese = voices.filter((item) => item.lang?.toLocaleLowerCase().startsWith("vi") === true).sort((left, right) => {
         const leftName = left.voiceName?.toLocaleLowerCase() ?? "";
         const rightName = right.voiceName?.toLocaleLowerCase() ?? "";
-        return Number(!leftName.includes("namminh") && !leftName.includes("nam minh"))
-          - Number(!rightName.includes("namminh") && !rightName.includes("nam minh"));
+        const preferred = (name: string): boolean => name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name);
+        return Number(!preferred(leftName)) - Number(!preferred(rightName));
       });
-      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng nam tiếng Việt" }); return; }
+      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng tiếng Việt" }); return; }
       const attempt = (index: number): void => {
         const voice = vietnamese[index];
         if (!voice) { respond({ ok: false, message: "Tất cả giọng Chrome tiếng Việt đều lỗi" }); return; }
