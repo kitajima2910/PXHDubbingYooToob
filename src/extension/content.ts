@@ -1,5 +1,12 @@
 import type { ExtensionState, SubtitleSegment } from "../shared/types";
 import { batchSegments, mergeOverlappingSegments, selectUpcomingSegments, stripTranscriptTimestamps } from "../shared/segments";
+
+// Inline — KHÔNG import từ ../shared/voices để giữ content script standalone.
+const DEFAULT_VOICE_ID = "vi-VN-NamMinhNeural";
+const VOICE_STORAGE_KEY = "dubbingVoiceId";
+function isKnownVoice(id: string): boolean {
+  return id === "vi-VN-NamMinhNeural" || id === "vi-VN-HoaiMyNeural";
+}
 import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTranscript, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
@@ -8,6 +15,7 @@ import { prepareBrowserTranslation } from "./translation/browser-translator";
 let state: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
 let scheduler: AudioScheduler | undefined;
 let controller: AbortController | undefined;
+let currentVoiceId = DEFAULT_VOICE_ID;
 let currentVideoId = "";
 let whisperMode = false;
 let whisperDelaySeconds = 5;
@@ -130,7 +138,7 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
     return;
   }
   try {
-    scheduler?.add(segment, await createSpeech(text, 1, signal));
+    scheduler?.add(segment, await createSpeech(text, 1, signal, currentVoiceId));
   } catch (error) {
     if (!chromeTtsAvailable) throw error;
     scheduler?.addSpeech(segment, text);
@@ -324,7 +332,10 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   const sessionController = controller;
-  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => createSpeech(text, 1, sessionController.signal));
+  const stored = await chrome.storage.local.get(VOICE_STORAGE_KEY);
+  const rawVoice = stored[VOICE_STORAGE_KEY];
+  currentVoiceId = typeof rawVoice === "string" && isKnownVoice(rawVoice) ? rawVoice : DEFAULT_VOICE_ID;
+  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId));
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { readTranscript, readTranslations, transcriptCacheConfigured, translationCacheConfigured, writeTranscript, writeTranslations } from "./cache/store.js";
+import { readTranscript, readTranslations, reviewTranslations, transcriptCacheConfigured, translationCacheConfigured, writeTranscript, writeTranslations } from "./cache/store.js";
 import { jsonError, prepare } from "./lib/http.js";
 
 const languageContext = z.object({ sourceLanguage: z.string().min(2).max(16) });
@@ -28,6 +28,10 @@ const schema = z.discriminatedUnion("action", [
     action: z.literal("translations:put"), targetLanguage: z.literal("vi"),
     segments: z.array(segment.pick({ sourceText: true }).extend({ translatedText: z.string().min(1).max(2_000) })).min(1).max(20),
   }),
+  languageContext.extend({
+    action: z.literal("translations:review"), targetLanguage: z.literal("vi"),
+    segments: z.array(segment.pick({ sourceText: true }).extend({ translatedText: z.string().min(1).max(2_000) })).min(1).max(20),
+  }),
 ]);
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -53,7 +57,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
     if (!translationCacheConfigured()) { res.status(200).json({ enabled: false }); return; }
-    await writeTranslations(data, data.segments);
+    if (data.action === "translations:review") {
+      await reviewTranslations(data, data.segments);
+    } else {
+      await writeTranslations(data, data.segments);
+    }
     res.status(200).json({ enabled: true });
   } catch (error) {
     console.error("Cache Neon thất bại", error instanceof Error ? error.message : "Lỗi không xác định");

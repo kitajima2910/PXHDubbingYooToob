@@ -327,3 +327,35 @@ export async function writeTranslations(
       updated_at = now()
   `, [context.sourceLanguage, context.targetLanguage, translationVersion(), JSON.stringify(payload)]);
 }
+
+export async function reviewTranslations(
+  context: TranslationCacheContext,
+  segments: Array<{ sourceText: string; translatedText: string }>,
+): Promise<void> {
+  const sql = database(translationDatabaseUrl());
+  if (!sql || !segments.length) return;
+  await ensureTranslationSchema(sql);
+  const payload = segments.map((segment) => {
+    const canonicalText = canonicalizeTranslationSource(segment.sourceText);
+    return {
+      source_hash: contentHash(segment.sourceText), canonical_hash: contentHash(canonicalText), canonical_text: canonicalText,
+      source_text: segment.sourceText, translated_text: segment.translatedText,
+    };
+  });
+  await sql.query(`
+    INSERT INTO pxh_dubbing.pxh_global_translation_memory (
+      source_language, target_language, translation_version, source_hash, canonical_hash, canonical_text, source_text, translated_text, quality
+    )
+    SELECT $1, $2, $3, item.source_hash, item.canonical_hash, item.canonical_text, item.source_text, item.translated_text, 'reviewed'
+    FROM jsonb_to_recordset($4::jsonb) AS item(
+      source_hash char(64), canonical_hash char(64), canonical_text text, source_text text, translated_text text
+    )
+    ON CONFLICT (source_language, target_language, translation_version, source_hash) DO UPDATE SET
+      canonical_hash = EXCLUDED.canonical_hash,
+      canonical_text = EXCLUDED.canonical_text,
+      source_text = CASE WHEN pxh_global_translation_memory.quality = 'gold' THEN pxh_global_translation_memory.source_text ELSE EXCLUDED.source_text END,
+      translated_text = CASE WHEN pxh_global_translation_memory.quality = 'gold' THEN pxh_global_translation_memory.translated_text ELSE EXCLUDED.translated_text END,
+      quality = CASE WHEN pxh_global_translation_memory.quality = 'gold' THEN 'gold' ELSE 'reviewed' END,
+      updated_at = now()
+  `, [context.sourceLanguage, context.targetLanguage, translationVersion(), JSON.stringify(payload)]);
+}

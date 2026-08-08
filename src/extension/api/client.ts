@@ -2,6 +2,7 @@ import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
 import { translateWithBrowser } from "../translation/browser-translator";
 import { runAdaptiveBatchSettled } from "../translation/adaptive-batch";
+import { audioCacheKey, getCachedAudio, setCachedAudio } from "../audio/audio-cache";
 
 interface ApiResponse<T> { ok: boolean; status: number; data?: T; audioBase64?: string; mimeType?: string; message?: string }
 export interface CacheContext { videoId: string; sourceLanguage: string }
@@ -83,19 +84,25 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
   });
 }
 
-export async function createSpeech(text: string, rate: number, signal?: AbortSignal): Promise<Blob> {
+export async function createSpeech(text: string, rate: number, signal?: AbortSignal, voice = "vi-VN-NamMinhNeural"): Promise<Blob> {
   const requestId = crypto.randomUUID();
   const onAbort = (): void => { void chrome.runtime.sendMessage({ action: "api-cancel", requestId }); };
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
+    // Cache audio IndexedDB: replay cùng text + voice + rate không gọi lại /api/tts.
+    const cacheKey = await audioCacheKey(text, voice, rate);
+    const cached = await getCachedAudio(cacheKey);
+    if (cached) return cached;
     const response = await chrome.runtime.sendMessage({
       action: "api-request", requestId, path: "/api/tts", responseType: "audio",
-      body: { text, voice: "vi-VN-NamMinhNeural", rate },
+      body: { text, voice, rate },
     }) as ApiResponse<never>;
     if (!response.ok || !response.audioBase64) throw new Error(response.message ?? "Không thể tạo giọng nói");
     const binary = atob(response.audioBase64);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return new Blob([bytes], { type: response.mimeType ?? "audio/mpeg" });
+    const blob = new Blob([bytes], { type: response.mimeType ?? "audio/mpeg" });
+    void setCachedAudio(cacheKey, blob).catch(() => undefined);
+    return blob;
   } finally { signal?.removeEventListener("abort", onAbort); }
 }
 

@@ -1,11 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
 import { jsonError, prepare, retry } from "./lib/http.js";
+import { edgeVoiceIds } from "../shared/voices.js";
 import { EdgeTtsProvider } from "./providers/tts.js";
+
+// Giữ danh sách giọng Edge TTS đồng bộ với src/shared/voices.ts.
+// Chỉ các giọng thực sự tồn tại trên Edge TTS (hiện có đúng 2 giọng Việt) — không thêm mới.
+// z.enum cần tuple literal nên cast sang [string, ...string[]]; runtime vẫn kiểm tra giá trị thật.
+const voice = z.enum(edgeVoiceIds() as [string, ...string[]]);
 
 const schema = z.object({
   text: z.string().min(1).max(1_000),
-  voice: z.enum(["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]),
+  voice,
   rate: z.number().min(0.85).max(1.3),
 });
 
