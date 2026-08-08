@@ -165,7 +165,7 @@ function webSpeechSpeak(text: string, rate: number): Promise<void> {
 
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
-  const upcoming = selectUpcomingSegments(segments, fromMs, 90_000, queued, 20);
+  const upcoming = selectUpcomingSegments(segments, fromMs, 60_000, queued);
   for (const item of upcoming) queued.add(item.id);
   const candidates = upcoming
     .map((segment) => ({ ...segment, sourceText: stripTranscriptTimestamps(segment.sourceText) }))
@@ -206,7 +206,7 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
         await prepare(segment);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(5, speechSegments.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(3, speechSegments.length) }, worker));
   }
   return candidates.length;
 }
@@ -326,11 +326,11 @@ async function bufferContinuously(
       if (seekVersion !== versionBefore) continue;
       if (!signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
       if (prepared > 0) { await wait(100, signal); continue; }
-      await wait(1_500, signal);
+      await wait(3_000, signal);
       if (signal.aborted) return;
       if (useBackend) {
         const fromMs = Math.max(0, Math.round(video.currentTime * 1000));
-        const loaded = await loadBackendCaptions(sessionVideoId, fromMs, fromMs + 90_000, signal);
+        const loaded = await loadBackendCaptions(sessionVideoId, fromMs, fromMs + 60_000, signal);
         segments = loaded.segments;
         void saveCachedTranscript(cacheContext(), loaded.source, loaded.segments, false).catch(() => undefined);
       }

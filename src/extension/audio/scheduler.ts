@@ -2,8 +2,8 @@ import type { SubtitleSegment } from "../../shared/types";
 
 interface ScheduledAudio { segment: SubtitleSegment; url?: string; text?: string }
 const MIN_SMOOTH_RATE = 0.95;
-const MAX_SMOOTH_RATE = 1.35;
-const MAX_PLAYBACK_RATE = 1.5;
+const MAX_SMOOTH_RATE = 1.25;
+const MAX_PLAYBACK_RATE = 1.35;
 
 export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs: number, videoRate: number): number {
   const naturalRate = !Number.isFinite(audioDurationSeconds) || audioDurationSeconds <= 0
@@ -14,7 +14,7 @@ export function speechPlaybackRate(audioDurationSeconds: number, slotDurationMs:
 }
 
 export function speechCatchupRate(latenessMs: number): number {
-  return 1 + Math.min(0.2, Math.max(0, latenessMs) / 40_000);
+  return 1 + Math.min(0.1, Math.max(0, latenessMs) / 40_000);
 }
 
 export function canStartSpeechAt(segment: SubtitleSegment, timelineMs: number): boolean {
