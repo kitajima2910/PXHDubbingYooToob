@@ -314,14 +314,13 @@ summaryBtn.addEventListener("click", async () => {
   summaryBtn.disabled = true;
   summaryBtn.textContent = "Đang tóm tắt…";
   summaryResult.style.display = "none";
-  try {
+
+  async function doSummary(): Promise<string> {
     const transcript = await cacheRequest<{ enabled: boolean; segments?: SubtitleSegment[] }>({
       action: "transcript:get", videoId, sourceLanguage: "auto",
     });
     if (!transcript?.enabled || !transcript.segments?.length) {
-      summaryResult.style.display = "block";
-      summaryResult.textContent = "Chưa có phụ đề cho video này.";
-      return;
+      return "Chưa có phụ đề cho video này.";
     }
     const sorted = [...transcript.segments].sort((a, b) => a.startMs - b.startMs).slice(0, 100);
     const segmentsForSummary = sorted.map((s) => ({ sourceText: s.sourceText, translatedText: s.translatedText }));
@@ -335,8 +334,20 @@ summaryBtn.addEventListener("click", async () => {
     if (!response?.ok || !response.data?.summary) {
       throw new Error(response?.message ?? "Không nhận được kết quả tóm tắt");
     }
+    return response.data.summary;
+  }
+
+  try {
+    let summary: string;
+    try {
+      summary = await doSummary();
+    } catch (firstError) {
+      // Retry once after 1s (cold start Neon/Vercel)
+      await new Promise((r) => setTimeout(r, 1000));
+      summary = await doSummary();
+    }
     summaryResult.style.display = "block";
-    summaryResult.textContent = response.data.summary;
+    summaryResult.textContent = summary;
   } catch (error) {
     summaryResult.style.display = "block";
     summaryResult.textContent = error instanceof Error ? error.message : "Lỗi khi tóm tắt.";

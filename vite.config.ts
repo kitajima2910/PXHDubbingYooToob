@@ -15,6 +15,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    modulePreload: { polyfill: false },
     rollupOptions: {
       input: {
         popup: resolve(__dirname, "popup.html"),
