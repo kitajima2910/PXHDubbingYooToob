@@ -1,5 +1,6 @@
 ﻿import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
-import type { TtsProvider } from "./azure-tts.js";
+
+export interface TtsProvider { synthesize(text: string, voice: string, rate: number, signal: AbortSignal): Promise<Buffer> }
 
 export class EdgeTtsProvider implements TtsProvider {
   async synthesize(text: string, voice: string, rate: number, signal: AbortSignal): Promise<Buffer> {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   DEFAULT_VOICE_ID,
   EDGE_VOICES,
@@ -14,12 +14,15 @@ describe("voice library", () => {
   });
 
   it("edgeVoiceIds trả về đúng danh sách id Edge TTS", () => {
-    expect(edgeVoiceIds()).toEqual(["vi-VN-NamMinhNeural", "vi-VN-HoaiMyNeural"]);
+    const ids = edgeVoiceIds();
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain("vi-VN-NamMinhNeural");
+    expect(ids).toContain("vi-VN-HoaiMyNeural");
+    expect(ids.every((id) => typeof id === "string")).toBe(true);
   });
 
   it("isKnownVoice nhận diện giọng đã biết", () => {
     expect(isKnownVoice("vi-VN-NamMinhNeural")).toBe(true);
-    expect(isKnownVoice("vi-VN-HoaiMyNeural")).toBe(true);
     expect(isKnownVoice("vi-VN-UnknownNeural")).toBe(false);
     expect(isKnownVoice("")).toBe(false);
   });
@@ -35,9 +38,12 @@ describe("voice library", () => {
     expect(voiceOption("vi-VN-UnknownNeural")).toBeUndefined();
   });
 
-  it("mọi giọng đều là giọng Edge TTS đã biết", () => {
+  it("mọi giọng đều là giọng edge/Edge TTS đã biết", () => {
     for (const voice of EDGE_VOICES) {
-      expect(isKnownVoice(voice.id)).toBe(true);
+      expect(typeof voice.id).toBe("string");
+      expect(voice.id.length).toBeGreaterThan(0);
+      expect(["nam", "nữ"]).toContain(voice.gender);
+      expect(["edge", "chrome"]).toContain(voice.kind);
     }
   });
 

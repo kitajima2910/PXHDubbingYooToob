@@ -1,4 +1,3 @@
-﻿// Legacy re-export — sử dụng AzureTtsProvider (primary) và EdgeTtsProvider (fallback) từ các file riêng.
-export type { TtsProvider } from "./azure-tts.js";
-export { AzureTtsProvider } from "./azure-tts.js";
+﻿// Legacy re-export — Edge TTS provider.
+export type { TtsProvider } from "./tts-edge.js";
 export { EdgeTtsProvider } from "./tts-edge.js";

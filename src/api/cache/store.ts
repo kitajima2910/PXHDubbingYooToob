@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+﻿import { createHash } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import type { SubtitleSegment } from "../../shared/types.js";
 
@@ -40,9 +40,9 @@ export type TranslationQuality = "machine" | "reviewed" | "gold";
 
 export function canonicalizeTranslationSource(text: string): string {
   const normalized = text.normalize("NFKC")
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”„]/g, '"')
-    .replace(/[‐‑‒–—]/g, "-")
+    .replace(/['\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014]/g, "-")
     .toLocaleLowerCase("en-US")
     .replace(/\s+/g, " ")
     .replace(/\s+([,.;!?])/g, "$1")
@@ -52,6 +52,31 @@ export function canonicalizeTranslationSource(text: string): string {
 
 export function contentHash(text: string): string {
   return createHash("sha256").update(text.replace(/\s+/g, " ").trim(), "utf8").digest("hex");
+}
+
+let purgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function autoPurgeTranscripts(sql: NeonQueryFunction<false, false>): Promise<void> {
+  // Xóa transcript cũ hơn 30 ngày để giữ Neon free tier (0.5 GB).
+  // Translation Memory KHÔNG bị xóa — dùng chung cross-video, nhẹ hơn.
+  try {
+    const deleted = await sql.query(`
+      WITH deleted_transcripts AS (
+        DELETE FROM pxh_dubbing.pxh_transcript_cache
+        WHERE updated_at < now() - INTERVAL '30 days'
+        RETURNING video_id
+      ), deleted_windows AS (
+        DELETE FROM pxh_dubbing.pxh_transcript_window_cache
+        WHERE updated_at < now() - INTERVAL '30 days'
+        RETURNING video_id
+      )
+      SELECT COUNT(*)::int AS count FROM deleted_transcripts
+    `) as Array<{ count: number }>;
+    if (deleted[0]?.count) console.info(`PXHDubbingYooToob: Auto-purge ${deleted[0].count} transcript rows >30 days old`);
+  } catch (error) {
+    // Không crash nếu purge lỗi — cache vẫn hoạt động bình thường
+    console.warn("PXHDubbingYooToob: Transcript auto-purge skipped", error instanceof Error ? error.message : "");
+  }
 }
 
 async function ensureTranscriptSchema(sql: NeonQueryFunction<false, false>): Promise<void> {
@@ -87,6 +112,9 @@ async function ensureTranscriptSchema(sql: NeonQueryFunction<false, false>): Pro
         PRIMARY KEY (video_id, source_language, start_ms, end_ms)
       )
     `);
+    // Auto-purge transcript >30 ngày — chạy 1 lần mỗi Vercel cold start, không block request
+    clearTimeout(purgeTimer);
+    purgeTimer = setTimeout(() => { void autoPurgeTranscripts(sql); }, 5_000);
   })().catch((error) => { transcriptSchemaReady = undefined; throw error; });
   await transcriptSchemaReady;
 }
@@ -168,6 +196,13 @@ export async function readTranscript(
   `, [context.videoId, context.sourceLanguage, fromMs ?? null, toMs ?? null]) as Array<{
     segment_id: string; start_ms: string | number; end_ms: string | number; source_text: string; source: string; is_complete: boolean;
   }>;
+  // Touch updated_at để auto-purge không xóa video đang xem thường xuyên
+  if (rows.length) {
+    void sql.query(`
+      UPDATE pxh_dubbing.pxh_transcript_cache SET updated_at = now()
+      WHERE video_id = $1 AND source_language = $2 AND updated_at < now() - INTERVAL '1 day'
+    `, [context.videoId, context.sourceLanguage]).catch(() => undefined);
+  }
   const source = rows[0]?.source;
   let covered: boolean | undefined;
   if (fromMs !== undefined && toMs !== undefined) {

@@ -2,12 +2,12 @@
   id: string;
   label: string;
   gender: "nam" | "nữ";
-  kind: "azure" | "chrome";
+  kind: "edge" | "chrome";
 }
 
 export const EDGE_VOICES: VoiceOption[] = [
-  { id: "vi-VN-NamMinhNeural", label: "Nam Minh (nam)", gender: "nam", kind: "azure" },
-  { id: "vi-VN-HoaiMyNeural", label: "Hoài My (nữ)", gender: "nữ", kind: "azure" },
+  { id: "vi-VN-NamMinhNeural", label: "Nam Minh (nam)", gender: "nam", kind: "edge" },
+  { id: "vi-VN-HoaiMyNeural", label: "Hoài My (nữ)", gender: "nữ", kind: "edge" },
 ];
 
 export const DEFAULT_VOICE_ID = "vi-VN-NamMinhNeural";
