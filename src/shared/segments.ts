@@ -59,3 +59,8 @@ export function selectChangedSegments(original: Array<{ id: string; translatedTe
   }
   return changed;
 }
+
+export function mapTranslations(segments: SubtitleSegment[], translated: Array<{ id: string; translatedText: string }>): SubtitleSegment[] {
+  const byId = new Map(translated.map((item) => [item.id, item.translatedText]));
+  return segments.map((segment) => ({ ...segment, translatedText: byId.get(segment.id) ?? segment.translatedText ?? undefined })) as SubtitleSegment[];
+}
