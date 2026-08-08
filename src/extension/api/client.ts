@@ -63,13 +63,34 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
     if (signal?.aborted) throw new DOMException("Đã hủy dịch", "AbortError");
     translatedMissing = cloud.results;
     if (cloud.failed.length) {
+      let localDone = false;
       try {
         const local = await translateWithBrowser(cloud.failed);
         translatedMissing.push(...local);
+        localDone = true;
         console.info("PXHDubbingYooToob: Groq không khả dụng, đang dùng Translator API trên máy");
       } catch (localError) {
         const localMessage = localError instanceof Error ? localError.message : "dịch trên máy không khả dụng";
-        console.info(`PXHDubbingYooToob: chế độ cache-only; bỏ qua ${cloud.failed.length} câu chưa dịch: ${localMessage}`);
+        console.info(`PXHDubbingYooToob: Translator API không khả dụng (${localMessage})`);
+      }
+      if (!localDone && cloud.failed.length <= 3) {
+        // Cooldown retry: đợi Groq rate-limit reset rồi thử lại từng câu
+        console.info(`PXHDubbingYooToob: đợi 12s rồi thử lại ${cloud.failed.length} câu qua Groq...`);
+        if (!signal?.aborted) await new Promise((r) => setTimeout(r, 12_000));
+        if (signal?.aborted) return [];
+        for (const segment of cloud.failed) {
+          try {
+            const result = await post<{ segments: Array<{ id: string; translatedText: string }> }>("/api/translate", {
+              segments: [{ id: segment.id, sourceText: segment.sourceText }], sourceLanguage: cache?.sourceLanguage ?? "auto", targetLanguage: "vi",
+            }, signal);
+            if (result.segments.length === 1 && result.segments[0]?.translatedText) {
+              translatedMissing.push({ ...segment, translatedText: result.segments[0].translatedText });
+            }
+          } catch { /* vẫn lỗi sau cooldown — thực sự không dịch được */ }
+        }
+      }
+      if (cloud.failed.length > translatedMissing.filter(s => cloud.failed.some(f => f.id === s.id)).length) {
+        console.warn(`PXHDubbingYooToob: bỏ qua ${cloud.failed.length} câu không dịch được, tiếp tục theo dõi`);
       }
     }
     if (cache) void cachePost({
