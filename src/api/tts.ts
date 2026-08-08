@@ -1,12 +1,9 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+﻿import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
 import { jsonError, prepare, retry } from "./lib/http.js";
 import { edgeVoiceIds } from "../shared/voices.js";
-import { EdgeTtsProvider } from "./providers/tts.js";
+import { EdgeTtsProvider } from "./providers/tts-edge.js";
 
-// Giữ danh sách giọng Edge TTS đồng bộ với src/shared/voices.ts.
-// Chỉ các giọng thực sự tồn tại trên Edge TTS (hiện có đúng 2 giọng Việt) — không thêm mới.
-// z.enum cần tuple literal nên cast sang [string, ...string[]]; runtime vẫn kiểm tra giá trị thật.
 const voice = z.enum(edgeVoiceIds() as [string, ...string[]]);
 
 const schema = z.object({
@@ -20,8 +17,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const input = schema.safeParse(req.body);
   if (!input.success) return jsonError(res, 400, "INVALID_INPUT", "Dữ liệu giọng nói không hợp lệ");
   try {
-    const provider = new EdgeTtsProvider();
-    const audio = await retry((signal) => provider.synthesize(input.data.text, input.data.voice, input.data.rate, signal));
+    // Edge TTS (free, Microsoft Read Aloud endpoint) — đã ổn định từ 2022.
+    // Nếu cần SLA chính thức, cấu hình AZURE_SPEECH_KEY + AZURE_SPEECH_REGION
+    // để dùng Azure Cognitive Services TTS (F0: 0.5M ký tự/tháng miễn phí, reset hàng tháng).
+    // Khi Azure được cấu hình, tự động dùng Azure thay Edge.
+    const azureConfigured = Boolean(process.env.AZURE_SPEECH_KEY?.trim() && process.env.AZURE_SPEECH_REGION?.trim());
+    let audio: Buffer;
+    if (azureConfigured) {
+      const { AzureTtsProvider } = await import("./providers/azure-tts.js");
+      audio = await retry((signal) => new AzureTtsProvider().synthesize(input.data.text, input.data.voice, input.data.rate, signal));
+    } else {
+      audio = await retry((signal) => new EdgeTtsProvider().synthesize(input.data.text, input.data.voice, input.data.rate, signal));
+    }
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=86400");
     res.status(200).send(audio);

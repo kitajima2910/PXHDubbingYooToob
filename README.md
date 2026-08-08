@@ -8,31 +8,30 @@ Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory (e
 
 **Tính năng cốt lõi đã hoàn thiện:**
 - Transcript ưu tiên DOM MAIN-world, fallback qua timedtext, Neon cache, và Groq Whisper (5s chunk).
-- Translation Memory 3 tầng (exact hash → canonical → quality tiers: machine/reviewed/gold) — dùng chung cross-video.
+- Translation Memory 3 tầng (exact hash → canonical → quality tiers) — dùng chung cross-video.
 - Bộ đệm liên tục 60 giây, tự bổ sung cho video dài bất kỳ.
 - Scheduler at-most-once, smooth rate (0.95–1.35), catch-up (max +20%), proactive replacement.
 - Cache audio IndexedDB (hash giọng/tốc độ/text) — replay không gọi lại TTS.
 - BYOK Groq: key riêng + auto-failover về backend. Cooldown sau 429.
 - Subtitle Editor: sửa bản dịch → quality `reviewed`, dùng lại cho mọi video.
 - Voice selection: Nam Minh (nam) / Hoài My (nữ).
-- Fallback đa tầng: Edge TTS → Chrome TTS → Web Speech API → bỏ qua câu lỗi.
+- TTS: Edge TTS (primary, free) → Chrome TTS → Web Speech → bỏ qua câu lỗi.
 - Dịch batch thích ứng (batch → nhỏ dần → từng câu → Chrome Translator API offline).
-- Dubbing lock: chặn 2 tab chạy cùng video. Content script tự phục hồi sau reload extension.
-- Chống audio feedback (fingerprint TTS, chặn Whisper nhận lại giọng dubbing).
-- Tab ẩn → pause dubbing; chuyển app → pause.
+- Dubbing lock: chặn 2 tab chạy cùng video. Content script tự phục hồi sau reload.
+- Chống audio feedback. Tab ẩn → pause. Chuyển app → pause.
 
 178/178 test pass, TypeScript strict pass, production build pass. Xem [STATUS.md](./STATUS.md).
 
 ## Kiến trúc
 
 - `src/extension`: popup, tích hợp YouTube, API client và bộ lập lịch audio.
-- `src/api`: handler Vercel, kiểm tra đầu vào, rate limit, retry và provider Groq/Edge TTS.
+- `src/api`: handler Vercel, Zod validation, rate limit, retry, provider Groq/TTS.
 - `src/shared`: kiểu và tiện ích dùng chung.
 - `api`: entrypoint cho Vercel.
 - `migrations`: schema SQL cho cache transcript/bản dịch trên Neon.
 - `tests`: 10 file, 178 test đơn vị.
 
-API key chỉ tồn tại trong biến môi trường backend. Extension không lưu MP3 trên server.
+API key chỉ tồn tại trong biến môi trường backend.
 
 ## Chạy local
 
@@ -45,6 +44,12 @@ Yêu cầu Node.js 20 trở lên.
 5. Mở `chrome://extensions` → **Tải tiện ích đã giải nén** → chọn `dist/`
 6. Mở video YouTube → bấm icon extension → **Bắt đầu lồng tiếng**
 
+## TTS: Edge TTS (free & stable)
+
+Mặc định dùng Edge TTS qua `msedge-tts` — cùng endpoint Microsoft Read Aloud của Edge browser, đã ổn định từ 2022, không giới hạn quota, không cần cấu hình gì thêm. Giọng Việt: Nam Minh (nam) và Hoài My (nữ).
+
+**Optional upgrade**: Cấu hình `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION` để dùng Azure Cognitive Services TTS (SLA chính thức, F0 free tier: 0.5M ký tự/tháng, reset hàng tháng). Khi Azure được cấu hình, hệ thống tự động dùng Azure thay Edge.
+
 ## Triển khai Vercel
 
 1. Import repository vào Vercel.
@@ -52,7 +57,7 @@ Yêu cầu Node.js 20 trở lên.
 3. Deploy → build với `VITE_API_BASE_URL=https://ten-du-an.vercel.app`.
 4. Sau khi Chrome cấp ID extension, set `EXTENSION_ORIGIN=chrome-extension://ID_EXTENSION` và deploy lại.
 
-Endpoint cache tự tạo bảng theo `migrations/`. Dùng `npm run migrate:global-translations` để chuyển dữ liệu cũ.
+Endpoint cache tự tạo bảng theo `migrations/`.
 
 ## Kiểm tra
 
@@ -67,11 +72,9 @@ Khi API/TTS lỗi, video gốc tiếp tục phát; extension bỏ qua riêng câ
 
 ## Giới hạn hiện tại
 
-- **Parser phụ thuộc DOM YouTube** (`ytInitialPlayerResponse`, `transcript-segment-view-model`) — có thể cần cập nhật khi YouTube thay đổi.
-- **Rate limit in-memory** — không chia sẻ giữa nhiều Vercel instance. Cần Redis/Upstash cho production.
+- **Parser phụ thuộc DOM YouTube** — có thể cần cập nhật khi YouTube thay đổi giao diện.
+- **Rate limit in-memory** — không chia sẻ giữa nhiều Vercel instance.
 - **Chưa có xác thực người dùng/quota** — CORS extension origin là biện pháp tạm thời.
-- **`msedge-tts` là client không chính thức** — sẽ thay bằng Azure Cognitive Services TTS chính thức.
 - **Playback rate**: đồng bộ tốt ở 0.5x–1.5x; >1.5x có thể lệch.
 - **Chưa có**: nhận dạng nhiều người nói (diarization), tách giọng khỏi nhạc nền.
-- **Chưa có Chrome E2E test** — cần thêm Playwright/Puppeteer test extension trên YouTube thật.
-- **npm audit**: 10 advisory (3 moderate, 7 high) từ transitive dependencies của `@vercel/node` — đang xử lý upgrade lên v4.
+- **Chưa có Chrome E2E test** — test thủ công trên Chrome/Brave với extension đã nạp.

@@ -1,13 +1,13 @@
-export interface VoiceOption {
+﻿export interface VoiceOption {
   id: string;
   label: string;
   gender: "nam" | "nữ";
-  kind: "edge" | "chrome";
+  kind: "azure" | "chrome";
 }
 
 export const EDGE_VOICES: VoiceOption[] = [
-  { id: "vi-VN-NamMinhNeural", label: "Nam Minh (nam)", gender: "nam", kind: "edge" },
-  { id: "vi-VN-HoaiMyNeural", label: "Hoài My (nữ)", gender: "nữ", kind: "edge" },
+  { id: "vi-VN-NamMinhNeural", label: "Nam Minh (nam)", gender: "nam", kind: "azure" },
+  { id: "vi-VN-HoaiMyNeural", label: "Hoài My (nữ)", gender: "nữ", kind: "azure" },
 ];
 
 export const DEFAULT_VOICE_ID = "vi-VN-NamMinhNeural";
