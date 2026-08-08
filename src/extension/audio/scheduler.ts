@@ -73,10 +73,7 @@ export class AudioScheduler {
       const activeSegment = this.active ? this.items.get(this.active.id)?.segment : undefined;
       const replacementReady = [...this.items.values()].some(({ segment }) =>
         segment.id !== activeSegment?.id && !this.played.has(segment.id) && canStartSpeechAt(segment, now));
-      const activeElapsed = activeSegment ? now - activeSegment.startMs : 0;
-      const activeSlot = activeSegment ? activeSegment.endMs - activeSegment.startMs : 0;
-      const activePastSeventy = activeSlot > 0 && activeElapsed > activeSlot * 0.7;
-      if (activeSegment && (now >= activeSegment.endMs || activePastSeventy) && replacementReady) this.stopActive();
+      if (activeSegment && now >= activeSegment.endMs && replacementReady) this.stopActive();
       const match = !this.active ? [...this.items.values()]
         .filter(({ segment }) => canStartSpeechAt(segment, now)
           && !this.played.has(segment.id))
