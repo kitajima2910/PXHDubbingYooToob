@@ -1,4 +1,4 @@
-import type { SubtitleSegment } from "./types.js";
+﻿import type { SubtitleSegment } from "./types.js";
 
 export function stripTranscriptTimestamps(text: string, knownTimestamp = ""): string {
   let cleaned = text;
@@ -40,7 +40,7 @@ export function mergeOverlappingSegments(segments: SubtitleSegment[], targetSpan
     if (gap <= targetSpanMs && totalText.length <= maxCharacters) {
       last.endMs = Math.max(last.endMs, segment.endMs);
       last.sourceText = totalText;
-      last.translatedText = last.translatedText && segment.translatedText ? last.translatedText + " " + segment.translatedText : undefined;
+      if (last.translatedText && segment.translatedText) { last.translatedText = last.translatedText + " " + segment.translatedText; } else { delete last.translatedText; }
     } else {
       merged.push({ ...segment });
     }
