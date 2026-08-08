@@ -29,6 +29,12 @@ app.innerHTML = `
     <div id="editorList" class="editor-list"></div>
     <button id="editorSave" class="editor-save" type="button" disabled>Lưu bản sửa</button>
   </details>
+  <details class="summary-card">
+    <summary>Tóm tắt video</summary>
+    <p class="summary-hint">Tóm tắt nội dung bằng AI — ngắn gọn, đầy đủ ý chính.</p>
+    <button id="summaryBtn" type="button">Tóm tắt ngay</button>
+    <div id="summaryResult" class="summary-result" style="display:none"></div>
+  </details>
   <footer>Transcript và bản dịch tự lưu khi bạn xem và lồng tiếng.</footer>`;
 
 const query = <T extends HTMLElement>(selector: string) => app.querySelector<T>(selector)!;
@@ -289,3 +295,49 @@ editorDetails.addEventListener("toggle", () => {
   void loadEditor();
 });
 editorSave.addEventListener("click", () => { void saveEditor(); });
+
+// ── Summary ──────────────────────────────────────────────
+const summaryBtn = query<HTMLButtonElement>("#summaryBtn");
+const summaryResult = query<HTMLElement>("#summaryResult");
+
+summaryBtn.addEventListener("click", async () => {
+  const videoId = parseVideoIdFromUrl(tab?.url);
+  if (!videoId) {
+    summaryResult.style.display = "block";
+    summaryResult.textContent = "Chưa mở video YouTube hợp lệ.";
+    return;
+  }
+  summaryBtn.disabled = true;
+  summaryBtn.textContent = "Đang tóm tắt…";
+  summaryResult.style.display = "none";
+  try {
+    const transcript = await cacheRequest<{ enabled: boolean; segments?: SubtitleSegment[] }>({
+      action: "transcript:get", videoId, sourceLanguage: "auto",
+    });
+    if (!transcript?.enabled || !transcript.segments?.length) {
+      summaryResult.style.display = "block";
+      summaryResult.textContent = "Chưa có phụ đề cho video này.";
+      return;
+    }
+    const sorted = [...transcript.segments].sort((a, b) => a.startMs - b.startMs).slice(0, 100);
+    const segmentsForSummary = sorted.map((s) => ({ sourceText: s.sourceText, translatedText: s.translatedText }));
+    const response = await chrome.runtime.sendMessage({
+      action: "api-request",
+      requestId: crypto.randomUUID(),
+      path: "/api/summary",
+      body: { segments: segmentsForSummary, maxWords: 150 },
+      responseType: "json",
+    }) as { ok?: boolean; data?: { summary?: string }; message?: string };
+    if (!response?.ok || !response.data?.summary) {
+      throw new Error(response?.message ?? "Không nhận được kết quả tóm tắt");
+    }
+    summaryResult.style.display = "block";
+    summaryResult.textContent = response.data.summary;
+  } catch (error) {
+    summaryResult.style.display = "block";
+    summaryResult.textContent = error instanceof Error ? error.message : "Lỗi khi tóm tắt.";
+  } finally {
+    summaryBtn.disabled = false;
+    summaryBtn.textContent = "Tóm tắt ngay";
+  }
+});

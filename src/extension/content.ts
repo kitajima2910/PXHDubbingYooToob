@@ -27,6 +27,7 @@ let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
+let seekVersion = 0;
 let trainingRecorder: MediaRecorder | undefined;
 let trainingStream: MediaStream | undefined;
 let trainingKeepAlivePort: chrome.runtime.Port | undefined;
@@ -147,17 +148,19 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
 
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
-  const upcoming = selectUpcomingSegments(segments, fromMs, 45_000, queued);
+  const upcoming = selectUpcomingSegments(segments, fromMs, 60_000, queued);
   for (const item of upcoming) queued.add(item.id);
   const candidates = upcoming
     .map((segment) => ({ ...segment, sourceText: stripTranscriptTimestamps(segment.sourceText) }))
     .filter((segment) => segment.sourceText.length > 0);
-  for (const batch of batchSegments(candidates, 8)) {
+  const versionAtStart = seekVersion;
+  for (const batch of batchSegments(candidates, 12)) {
     if (signal.aborted) return 0;
     update({ status: "translating", message: "Đang dịch" });
     let translated: SubtitleSegment[];
     try { translated = await translateForVideo(batch, signal); }
     catch (error) { for (const item of batch) queued.delete(item.id); throw error; }
+    if (seekVersion !== versionAtStart) break; // seek happened, abandon stale batch
     // Dịch/cache theo từng caption gốc để tiếp tục tận dụng Translation Memory,
     // sau đó mới ghép thành cụm nói dài hơn cho TTS tự nhiên.
     const speechSegments = mergeOverlappingSegments(translated);
@@ -299,13 +302,16 @@ async function bufferContinuously(
   let segments = initialSegments;
   while (!signal.aborted) {
     try {
-      const fromMs = Math.max(0, Math.round(video.currentTime * 1000));
+      const versionBefore = seekVersion;
       const prepared = await buildWindow(segments, video, signal, queued);
+      // Seek happened during buildWindow → restart immediately
+      if (seekVersion !== versionBefore) continue;
       if (!signal.aborted) update({ status: "ready", message: "Sẵn sàng" });
-      if (prepared > 0) { await wait(250, signal); continue; }
-      await wait(4_000, signal);
+      if (prepared > 0) { await wait(100, signal); continue; }
+      await wait(3_000, signal);
       if (signal.aborted) return;
       if (useBackend) {
+        const fromMs = Math.max(0, Math.round(video.currentTime * 1000));
         const loaded = await loadBackendCaptions(sessionVideoId, fromMs, fromMs + 60_000, signal);
         segments = loaded.segments;
         void saveCachedTranscript(cacheContext(), loaded.source, loaded.segments, false).catch(() => undefined);
@@ -315,7 +321,7 @@ async function bufferContinuously(
         update({ status: "ready", message: "Đang tạo bộ đệm" });
         console.warn("PXHDubbingYooToob: sẽ thử nạp lại bộ đệm", error);
       }
-      await wait(4_000, signal);
+      await wait(3_000, signal);
     }
   }
 }
@@ -378,6 +384,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     update({ source: captions.source.startsWith("Neon cache") ? captions.source : "Transcript — đồng bộ" });
     scheduler.start();
     const queued = new Set<string>();
+    const onSeekBuffer = (): void => { seekVersion++; queued.clear(); };
+    video.addEventListener("seeking", onSeekBuffer);
     await buildWindow(captions.segments, video, sessionController.signal, queued);
     if (state.processedSegments === 0) {
       update({ status: "ready", message: "Chưa có bản dịch cache — đang tiếp tục theo dõi" });
@@ -387,6 +395,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     if (!sessionController.signal.aborted) {
       void bufferContinuously(video, currentVideoId, captions.segments, useBackend, sessionController.signal, queued);
     }
+    // Note: seek listener on video is lightweight; not removed on stop() per spec.
   } catch (error) {
     if (resumeWhenReady && video.paused) void video.play().catch(() => undefined);
     if (!sessionController.signal.aborted) fail(error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng");

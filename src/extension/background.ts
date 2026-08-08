@@ -3,7 +3,7 @@ import { parseYouTubeTrainingTarget } from "./training/youtube-url";
 import { runAdaptiveBatch } from "./training/adaptive-batch";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache"]);
+const allowedPaths = new Set(["/api/subtitles/youtube", "/api/translate", "/api/tts", "/api/transcribe", "/api/cache", "/api/summary"]);
 const requests = new Map<string, AbortController>();
 
 interface PlaylistTrainingResult { total: number; trained: number; skipped: number; segments: number; failedVideoIds: string[] }
