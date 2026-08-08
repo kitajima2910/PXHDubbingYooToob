@@ -49,6 +49,14 @@ export function selectUpcomingSegments(segments: SubtitleSegment[], fromMs: numb
   return segments.filter((item) => item.endMs >= fromMs && item.startMs <= toMs && !queued.has(item.id)).slice(0, limit);
 }
 
+// Batch khởi động nhanh: chỉ 5 câu để respond popup trong <2s
+export function selectUpcomingSegmentsFast(segments: SubtitleSegment[], fromMs: number, windowMs: number, queued: ReadonlySet<string>): SubtitleSegment[] {
+  return selectUpcomingSegments(segments, fromMs, windowMs, queued, 5);
+}
+  const toMs = fromMs + windowMs;
+  return segments.filter((item) => item.endMs >= fromMs && item.startMs <= toMs && !queued.has(item.id)).slice(0, limit);
+}
+
 export function mergeOverlappingSegments(segments: SubtitleSegment[], targetSpanMs = 6_000, maxCharacters = 180): SubtitleSegment[] {
   const sorted = [...segments].sort((left, right) => left.startMs - right.startMs);
   const merged: SubtitleSegment[] = [];

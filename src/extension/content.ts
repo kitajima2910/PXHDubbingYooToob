@@ -405,7 +405,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     const queued = new Set<string>();
     const onSeekBuffer = (): void => { seekVersion++; queued.clear(); };
     video.addEventListener("seeking", onSeekBuffer);
-    await buildWindow(captions.segments, video, sessionController.signal, queued);
+    await buildWindow(captions.segments, video, sessionController.signal, queued, 5);
     if (state.processedSegments === 0) {
       update({ status: "ready", message: "Chưa có bản dịch cache — đang tiếp tục theo dõi" });
     }
