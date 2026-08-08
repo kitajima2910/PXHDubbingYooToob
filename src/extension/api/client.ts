@@ -28,7 +28,7 @@ async function cachePost<T>(body: unknown, signal?: AbortSignal): Promise<T | un
     cacheAvailability[cacheType] = result.enabled !== false;
     return cacheAvailability[cacheType] ? result : undefined;
   } catch (error) {
-    if (!signal?.aborted) console.warn("PXHDubbingYooToob: bỏ qua cache Neon", error);
+    // silent — cache miss is expected for new videos
     return undefined;
   }
 }

@@ -23,7 +23,7 @@ app.innerHTML = `
     <form id="keyForm"><input id="groqKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_••••••••••••"><button type="submit">Lưu</button></form>
     <button id="useDefault" class="default-key" type="button">Dùng API key mặc định</button>
   </section>
-  <details id="subtitleEditor" class="editor-card">
+  <details id="subtitleEditor" class="editor-card" style="display:none">
     <summary class="editor-summary"><span>Subtitle Editor</span><small>Sửa bản dịch 1 lần — mọi video sau dùng bản đã sửa</small></summary>
     <p id="editorStatus" class="editor-status">Mở để xem transcript của video này</p>
     <div id="editorList" class="editor-list"></div>
