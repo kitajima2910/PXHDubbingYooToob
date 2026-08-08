@@ -246,20 +246,24 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   const effectiveDelay = whisperDelaySeconds;
   const desiredStartMs = capturedStartMs + effectiveDelay * 1000;
   const anchorMs = Math.round(Math.max(desiredStartMs, video.currentTime * 1000 + 250));
+  const firstRelativeStartMs = fromCache ? 0 : Math.max(0, sourceSegments[0]?.startMs ?? 0);
   const segments = fromCache ? sourceSegments.map((segment, index) => ({
     ...segment, id: `cache-${chunkId}-${index}`,
     startMs: Math.max(anchorMs, segment.startMs + effectiveDelay * 1000),
     endMs: Math.max(anchorMs + 500, segment.endMs + effectiveDelay * 1000),
   })) : sourceSegments.map((segment, index) => ({
     ...segment, id: `whisper-${chunkId}-${index}`,
-    startMs: anchorMs + segment.startMs,
-    endMs: anchorMs + Math.max(segment.startMs + 500, segment.endMs),
+    startMs: anchorMs + Math.max(0, segment.startMs - firstRelativeStartMs),
+    endMs: anchorMs + Math.max(500, segment.endMs - firstRelativeStartMs),
   }));
   if (!fromCache) {
-    const transcriptSegments = segments.map((segment) => ({
+    // Cache giữ timeline gốc của phần audio đã thu, không dùng timeline phát
+    // đã được neo theo thời điểm xử lý (có thể trễ khi hàng đợi đang bận).
+    const transcriptSegments = sourceSegments.map((segment, index) => ({
       ...segment,
-      startMs: segment.startMs - effectiveDelay * 1000,
-      endMs: segment.endMs - effectiveDelay * 1000,
+      id: `whisper-cache-${chunkId}-${index}`,
+      startMs: capturedStartMs + segment.startMs,
+      endMs: capturedStartMs + Math.max(segment.startMs + 500, segment.endMs),
     }));
     await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal, {
       fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
@@ -396,7 +400,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
           scheduler.start();
           const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript"; console.info(`PXHDubbingYooToob: chuyen sang Whisper (${reason})`);
           whisperMode = true;
-          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — bộ đệm khoảng 10 giây" });
+          update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — realtime có độ trễ ngắn" });
           await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
           if (resumeWhenReady) void video.play().catch(() => undefined);
           return state;

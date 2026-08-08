@@ -42,8 +42,9 @@ function recordChunk(): void {
     })).finally(() => { if (stream?.active) recordChunk(); });
   }, { once: true });
   current.start();
-  // 10 giây cho Whisper đủ ngữ cảnh và giảm số câu bị cắt đúng biên chunk.
-  timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 10_000);
+  // Chunk ngắn để giữ độ trễ nhận dạng gần realtime. Việc chống mất câu được
+  // xử lý ở hàng đợi FIFO và thứ tự scheduler, không kéo dài bộ đệm phát.
+  timer = window.setTimeout(() => { if (current.state === "recording") current.stop(); }, 5_000);
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {

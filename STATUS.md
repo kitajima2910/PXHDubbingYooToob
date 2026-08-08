@@ -53,7 +53,7 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 ### Đã thay đổi
 - Không còn loại toàn bộ chunk Whisper khi mô hình nhận diện tiếng Việt; chỉ bỏ segment thực sự trùng nội dung TTS đã phát.
 - Bảo đảm câu đầu trong mỗi chunk được đưa vào scheduler trước, tránh câu sau hoàn thành TTS sớm và làm câu trước hết thời gian phát.
-- Tăng cửa sổ thu Whisper từ 5 lên 10 giây để có thêm ngữ cảnh và giảm mất câu ở biên audio.
+- Giữ cửa sổ thu Whisper 5 giây để hạn chế độ trễ realtime; chuẩn hóa timestamp tương đối theo câu đầu của chunk để không cộng thêm độ trễ cho từng câu.
 - Cho phép mọi giọng Chrome TTS tiếng Việt trong Whisper mode, vẫn ưu tiên Nam Minh/giọng nam, nhằm tránh MP3 dubbing bị thu ngược vào tab khi máy có giọng Việt khác.
 
 ### File đã sửa
