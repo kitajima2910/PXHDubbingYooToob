@@ -44,7 +44,7 @@ export function mapTranslations(segments: SubtitleSegment[], translated: Array<{
   return segments.map((segment) => ({ ...segment, translatedText: byId.get(segment.id) ?? segment.sourceText }));
 }
 
-export function selectUpcomingSegments(segments: SubtitleSegment[], fromMs: number, windowMs: number, queued: ReadonlySet<string>, limit = 8): SubtitleSegment[] {
+export function selectUpcomingSegments(segments: SubtitleSegment[], fromMs: number, windowMs: number, queued: ReadonlySet<string>, limit = 15): SubtitleSegment[] {
   const toMs = fromMs + windowMs;
   return segments.filter((item) => item.endMs >= fromMs && item.startMs <= toMs && !queued.has(item.id)).slice(0, limit);
 }

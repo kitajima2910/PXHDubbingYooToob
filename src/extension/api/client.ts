@@ -14,10 +14,17 @@ async function googleTranslate(text: string, signal?: AbortSignal): Promise<stri
 
 async function translateWithGoogleFallback(segments: SubtitleSegment[], signal?: AbortSignal): Promise<SubtitleSegment[]> {
   const results: SubtitleSegment[] = [];
-  for (const segment of segments) {
-    try {
-      results.push({ ...segment, translatedText: await googleTranslate(segment.sourceText, signal) });
-    } catch { /* bỏ qua câu lỗi */ }
+  // Dịch song song 3 câu/lúc để tăng tốc — Google Translate chịu được 3 concurrent
+  const concurrency = 3;
+  for (let i = 0; i < segments.length; i += concurrency) {
+    const batch = segments.slice(i, i + concurrency);
+    const batchResults = await Promise.allSettled(batch.map(async (seg) => {
+      const translation = await googleTranslate(seg.sourceText, signal ?? undefined);
+      return { ...seg, translatedText: translation };
+    }));
+    for (const r of batchResults) {
+      if (r.status === "fulfilled") results.push(r.value);
+    }
   }
   return results;
 }
