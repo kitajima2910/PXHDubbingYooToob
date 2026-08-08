@@ -196,7 +196,8 @@ async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement,
     };
     // Chuẩn bị tuần tự cho đến khi câu đầu tiên thật sự sẵn sàng. Trước đây
     // một trong ba câu phía sau có thể hoàn thành trước và làm video chạy sớm.
-    while (!signal.aborted && state.processedSegments === 0 && nextIndex < speechSegments.length) {
+      const segmentsBefore = state.processedSegments;
+    while (!signal.aborted && state.processedSegments === segmentsBefore && nextIndex < speechSegments.length) {
       await prepare(speechSegments[nextIndex++]!);
     }
     const worker = async (): Promise<void> => {
