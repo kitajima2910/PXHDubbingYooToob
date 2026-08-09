@@ -192,8 +192,8 @@ function acceptPcm(samples: Float32Array): void {
     if (sherpaRecognizer.isEndpoint(sherpaStream)) {
       const durationMs = Math.max(400, Date.now() - sherpaUtteranceStartedAt);
       const remainingText = text.startsWith(sherpaCommittedSource) ? text.slice(sherpaCommittedSource.length).trim() : text;
-      if (remainingText) void chrome.runtime.sendMessage({
-        action: "capture-local-final", tabId: targetTabId, durationMs, capturedAt: Date.now(), text: remainingText,
+      if (text) void chrome.runtime.sendMessage({
+        action: "capture-local-final", tabId: targetTabId, durationMs, capturedAt: Date.now(), text: remainingText, fullText: text,
       });
       sherpaRecognizer.reset(sherpaStream);
       sherpaLastPartial = ""; sherpaCommittedSource = ""; sherpaUtteranceStartedAt = Date.now();

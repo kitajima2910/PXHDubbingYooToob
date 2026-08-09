@@ -474,3 +474,27 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Tổng dung lượng model không đổi (~199 MB); thay đổi này giải quyết giới hạn GitHub, không giảm dung lượng cài extension.
+
+## Fix Live Caption Việt bị thiếu/mảnh — 2026-08-09
+
+### Đã thay đổi gì
+- Nguyên nhân gốc: các yêu cầu dịch partial chạy chồng nhau; kết quả hoàn tất sau một hypothesis mới bị loại, nên khi nói liên tục caption gần như không có cơ hội hiển thị.
+- Chuyển dịch partial sang single-flight/latest-wins: tại một thời điểm chỉ có một yêu cầu dịch, hypothesis mới nhất được giữ lại và xử lý ngay sau yêu cầu hiện tại.
+- Không còn loại bản dịch hợp lệ chỉ vì một partial mới vừa đến.
+- Stable partial dành cho TTS và phần đuôi final không còn được phép ghi đè Live Caption đầy đủ bằng một mảnh câu ngắn.
+- Endpoint final gửi thêm toàn bộ hypothesis để đảm bảo caption cuối câu được dịch đầy đủ; TTS vẫn chỉ đọc phần chưa commit để tránh lặp.
+
+### File đã sửa
+- `src/extension/offscreen.ts`
+- `src/extension/background.ts`
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Brave vẫn dùng Google Translate fallback qua mạng vì không có Translator API local. Single-flight ngăn mất caption và nghẽn request nhưng không thể bảo đảm độ trễ Google Meet nếu dịch vụ mạng phản hồi chậm.
