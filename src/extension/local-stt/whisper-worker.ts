@@ -5,6 +5,9 @@ import jsepWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 const MODEL_ID = "onnx-community/whisper-tiny";
 type Transcriber = Awaited<ReturnType<typeof pipeline<"automatic-speech-recognition">>>;
 let transcriberPromise: Promise<Transcriber> | undefined;
+interface TranscriptionJob { id: number; samples: Float32Array }
+const transcriptionQueue: TranscriptionJob[] = [];
+let transcriptionRunning = false;
 
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
@@ -72,6 +75,34 @@ async function transcribe(id: number, samples: Float32Array): Promise<void> {
   self.postMessage({ type: "transcription", id, segments });
 }
 
+function drainTranscriptions(): void {
+  if (transcriptionRunning) return;
+  transcriptionRunning = true;
+  void (async () => {
+    while (transcriptionQueue.length) {
+      const job = transcriptionQueue.shift()!;
+      try { await transcribe(job.id, job.samples); }
+      catch (error) {
+        self.postMessage({ type: "transcription-error", id: job.id, message: error instanceof Error ? error.message : "Whisper local thất bại" });
+      }
+    }
+  })().finally(() => {
+    transcriptionRunning = false;
+    if (transcriptionQueue.length) drainTranscriptions();
+  });
+}
+
+function enqueueTranscription(job: TranscriptionJob): void {
+  // Giữ câu đang xử lý và tối đa hai câu mới nhất; không để inference chồng nhau
+  // làm tranh GPU với video. Câu quá cũ được báo bỏ để offscreen giải phóng pending.
+  while (transcriptionQueue.length >= 2) {
+    const dropped = transcriptionQueue.shift()!;
+    self.postMessage({ type: "transcription-error", id: dropped.id, message: "Máy đang bận, bỏ đoạn nhận dạng đã quá cũ" });
+  }
+  transcriptionQueue.push(job);
+  drainTranscriptions();
+}
+
 self.addEventListener("message", (event: MessageEvent<{ type?: string; id?: number; samples?: Float32Array }>) => {
   if (event.data.type === "init") {
     void getTranscriber().then(
@@ -80,9 +111,7 @@ self.addEventListener("message", (event: MessageEvent<{ type?: string; id?: numb
     );
   }
   if (event.data.type === "transcribe" && event.data.samples && event.data.id !== undefined) {
-    void transcribe(event.data.id, event.data.samples).catch((error: unknown) => self.postMessage({
-      type: "transcription-error", id: event.data.id, message: error instanceof Error ? error.message : "Whisper local thất bại",
-    }));
+    enqueueTranscription({ id: event.data.id, samples: event.data.samples });
   }
 });
 

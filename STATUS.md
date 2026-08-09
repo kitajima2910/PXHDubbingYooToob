@@ -365,3 +365,25 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - DRM, player không dùng HTML5 video, iframe khác miền và trang chặn capture có thể không hoạt động; đây là giới hạn nền tảng/trình duyệt.
+
+## Fix Live Caption/video giật lag — 2026-08-09
+
+### Đã thay đổi
+- Tuần tự hóa toàn bộ inference Whisper trong Worker; không còn nhiều lệnh chạy đồng thời tranh WebGPU với video.
+- Giới hạn hàng đợi còn hai câu mới nhất; đoạn tồn đọng quá cũ được bỏ và giải phóng khỏi pending để tránh tăng RAM/latency vô hạn.
+- Bỏ cơ chế backpressure tự gọi `video.pause()`/`video.play()` gây hình ảnh giật; giờ chỉ cập nhật trạng thái trong popup.
+- Live Caption vẫn cập nhật theo bản dịch tiếng Việt final.
+
+### File đã sửa
+- `src/extension/local-stt/whisper-worker.ts`
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; Worker Whisper mới đã được phát hành trong `dist`.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Nếu một inference WebGPU duy nhất vẫn tranh GPU với giải mã video trên máy yếu, cần thêm lựa chọn CPU q8 trong popup; CPU sẽ mượt hình hơn nhưng STT chậm hơn.

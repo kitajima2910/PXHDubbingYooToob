@@ -29,7 +29,6 @@ let whisperProcessing = false;
 let whisperQueue: WhisperChunk[] = [];
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
-let resumeAfterLocalBackpressure = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let seekVersion = 0;
@@ -466,7 +465,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   currentVideoId = videoId();
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
-  whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false; resumeAfterLocalBackpressure = false;
+  whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   const sessionController = controller;
   const stored = await chrome.storage.local.get(VOICE_STORAGE_KEY);
@@ -555,7 +554,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
-  resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false; resumeAfterLocalBackpressure = false;
+  resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
   recentDubbingTexts = [];
   scheduledEndMs = 0;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
@@ -655,11 +654,8 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
     respond({ ok: true }); return;
   }
   if (request.action === "whisper-local-backpressure") {
-    const video = document.querySelector<HTMLVideoElement>("video");
-    if (video && whisperMode) {
-      if (request.active && !video.paused) { resumeAfterLocalBackpressure = true; video.pause(); update({ status: "loading", message: "Máy đang bắt kịp nhận dạng" }); }
-      else if (!request.active && resumeAfterLocalBackpressure) { resumeAfterLocalBackpressure = false; void video.play().catch(() => undefined); }
-    }
+    if (whisperMode && request.active) update({ status: "loading", message: "Đang tối ưu hàng đợi nhận dạng" });
+    else if (whisperMode) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
     respond({ ok: true }); return;
   }
   const operation = request.action === "stop" ? stop() : start(request.delaySeconds ?? DEFAULT_DELAY_SECONDS, request.sourceVolume ?? DEFAULT_SOURCE_VOLUME);
