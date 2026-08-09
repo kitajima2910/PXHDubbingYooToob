@@ -4,22 +4,19 @@ Chrome Extension Manifest V3 lồng tiếng Việt thông minh cho video YouTube
 
 ## Trạng thái
 
-Pipeline transcript: `Transcript DOM → cache Neon → Translation Memory → Groq/Chrome Translator → Edge TTS / Chrome TTS → phát đồng bộ`.
-
-Pipeline không transcript: `tabCapture → AudioWorklet PCM 16 kHz → VAD → Whisper tiny local (WebGPU/WASM) → Chrome Translator → Chrome TTS`.
+Pipeline hoàn chỉnh: `Transcript DOM → cache Neon → Translation Memory (exact/canonical/gold) → Groq dịch → Edge TTS / Chrome TTS / Web Speech → phát đồng bộ`.
 
 **Tính năng cốt lõi đã hoàn thiện:**
-- Transcript ưu tiên DOM MAIN-world, fallback qua timedtext và Neon cache.
-- Video không transcript dùng Whisper local; model tải một lần, cache trong trình duyệt và không cần API key STT.
+- Transcript ưu tiên DOM MAIN-world, fallback qua timedtext, Neon cache, và Groq Whisper (5s chunk).
 - Translation Memory 3 tầng (exact hash → canonical → quality tiers) — dùng chung cross-video.
 - Bộ đệm liên tục 60 giây, tự bổ sung cho video dài bất kỳ.
 - Scheduler at-most-once, smooth rate (0.95–1.35), catch-up (max +20%), proactive replacement.
 - Cache audio IndexedDB (hash giọng/tốc độ/text) — replay không gọi lại TTS.
-- BYOK Groq vẫn khả dụng cho pipeline transcript/cloud; nhánh Whisper local không gọi Groq.
+- BYOK Groq: key riêng + auto-failover về backend. Cooldown sau 429.
 - Subtitle Editor: sửa bản dịch → quality `reviewed`, dùng lại cho mọi video.
 - Voice selection: Nam Minh (nam) / Hoài My (nữ).
 - TTS: Edge TTS (primary, free) → Chrome TTS → Web Speech → bỏ qua câu lỗi.
-- Nhánh không transcript dịch bằng Chrome Translator API offline; yêu cầu Chrome có Translator API.
+- Dịch batch thích ứng (batch → nhỏ dần → từng câu → Chrome Translator API offline).
 - Dubbing lock: chặn 2 tab chạy cùng video. Content script tự phục hồi sau reload.
 - Chống audio feedback. Tab ẩn → pause. Chuyển app → pause.
 

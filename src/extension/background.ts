@@ -331,32 +331,27 @@ function startPlaylistTraining(value: string): void {
   });
 }
 
-let creatingOffscreen: Promise<void> | undefined;
 async function ensureOffscreenDocument(): Promise<void> {
   const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] });
   if (contexts.length) return;
-  creatingOffscreen ??= chrome.offscreen.createDocument({
-    url: "offscreen.html", reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WORKERS],
-    justification: "Tải Whisper local và thu âm tab YouTube khi video không có phụ đề",
-  }).finally(() => { creatingOffscreen = undefined; });
-  await creatingOffscreen;
+  await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: [chrome.offscreen.Reason.USER_MEDIA], justification: "Thu âm tab YouTube để nhận dạng lời nói khi video không có phụ đề" });
 }
 
-async function startTabCapture(tabId: number, sourceVolume: number, grantedStreamId?: string): Promise<void> {
+async function startTabCapture(tabId: number, sourceVolume: number): Promise<void> {
   await ensureOffscreenDocument();
-  const streamId = grantedStreamId ?? await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   const response = await chrome.runtime.sendMessage({ action: "capture-offscreen-start", streamId, tabId, sourceVolume }) as { ok?: boolean; message?: string };
   if (!response?.ok) throw new Error(response?.message ?? "Không thể bắt đầu thu âm tab");
 }
 
-async function ensureTabCapture(tabId: number, sourceVolume: number, grantedStreamId?: string): Promise<void> {
+async function ensureTabCapture(tabId: number, sourceVolume: number): Promise<void> {
   await ensureOffscreenDocument();
   const status = await chrome.runtime.sendMessage({ action: "capture-offscreen-status" }) as { active?: boolean; tabId?: number } | undefined;
   if (status?.active && status.tabId === tabId) {
     await chrome.runtime.sendMessage({ action: "capture-offscreen-volume", sourceVolume });
     return;
   }
-  await startTabCapture(tabId, sourceVolume, grantedStreamId);
+  await startTabCapture(tabId, sourceVolume);
 }
 
 async function stopTabCapture(): Promise<void> {
@@ -511,59 +506,7 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; streamId?: string; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; fullText?: string; utteranceId?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
-  if (request?.action === "local-model-init") {
-    const tabId = sender.tab?.id ?? request.tabId;
-    void ensureOffscreenDocument()
-      .then(() => chrome.runtime.sendMessage({ action: "capture-offscreen-model-init", tabId }))
-      .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không khởi tạo được Whisper local" }));
-    return true;
-  }
-  if (request?.action === "local-model-status") {
-    void ensureOffscreenDocument()
-      .then(() => chrome.runtime.sendMessage({ action: "capture-offscreen-model-status" }))
-      .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không đọc được trạng thái Whisper local" }));
-    return true;
-  }
-  if (request?.action === "local-model-event" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, {
-      action: "local-model-event", type: request.type, progress: request.progress, message: request.message,
-    }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-chunk" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, {
-      action: "whisper-local-chunk", durationMs: request.durationMs, capturedAt: request.capturedAt, segments: request.segments ?? [],
-    }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-partial" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-partial", utteranceId: request.utteranceId, text: request.text,
-    }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-stable" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-stable", utteranceId: request.utteranceId, text: request.text,
-    }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-final" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-final", utteranceId: request.utteranceId, text: request.text, fullText: request.fullText,
-      durationMs: request.durationMs, capturedAt: request.capturedAt,
-    }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-error" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-local-error", message: request.message }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
-  if (request?.action === "capture-local-backpressure" && request.tabId !== undefined) {
-    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-local-backpressure", active: request.active === true }).catch(() => undefined);
-    respond({ ok: true }); return;
-  }
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
   if (request?.action === "playlist-train-reset") {
     playlistTrainingCancelled = true;
     playlistTrainingController?.abort();
@@ -581,7 +524,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
     const sourceVolume = request.sourceVolume ?? 0.08;
-    void ensureTabCapture(targetTabId, sourceVolume, request.streamId).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
+    void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
   if (request?.action === "capture-stop") {
@@ -598,19 +541,26 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return true;
   }
   if (request?.action === "tts-status") {
-    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) =>
-      voice.lang?.toLocaleLowerCase().startsWith("vi") === true) }));
+    chrome.tts.getVoices((voices) => respond({ ok: true, available: voices.some((voice) => {
+      const name = voice.voiceName?.toLocaleLowerCase() ?? "";
+      return voice.lang?.toLocaleLowerCase().startsWith("vi") === true
+        && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
+    }) }));
     return true;
   }
   if (request?.action === "tts-speak" && request.text) {
     chrome.tts.getVoices((voices) => {
-      const vietnamese = voices.filter((item) => item.lang?.toLocaleLowerCase().startsWith("vi") === true).sort((left, right) => {
+      const vietnamese = voices.filter((item) => {
+        const name = item.voiceName?.toLocaleLowerCase() ?? "";
+        return item.lang?.toLocaleLowerCase().startsWith("vi") === true
+          && (name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name));
+      }).sort((left, right) => {
         const leftName = left.voiceName?.toLocaleLowerCase() ?? "";
         const rightName = right.voiceName?.toLocaleLowerCase() ?? "";
-        const preferred = (name: string): boolean => name.includes("namminh") || name.includes("nam minh") || /\b(?:male|nam)\b/.test(name);
-        return Number(!preferred(leftName)) - Number(!preferred(rightName));
+        return Number(!leftName.includes("namminh") && !leftName.includes("nam minh"))
+          - Number(!rightName.includes("namminh") && !rightName.includes("nam minh"));
       });
-      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng tiếng Việt" }); return; }
+      if (!vietnamese.length) { respond({ ok: false, message: "Máy chưa có giọng nam tiếng Việt" }); return; }
       const attempt = (index: number): void => {
         const voice = vietnamese[index];
         if (!voice) { respond({ ok: false, message: "Tất cả giọng Chrome tiếng Việt đều lỗi" }); return; }
@@ -649,7 +599,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return;
   }
   if (request?.action !== "api-request" || !request.requestId || !request.path || !allowedPaths.has(request.path)) return;
-  if (sender.tab?.url && !/^https?:\/\//i.test(sender.tab.url)) {
+  if (sender.tab?.url && !sender.tab.url.startsWith("https://www.youtube.com/watch")) {
     respond({ ok: false, status: 403, message: "Trang gọi API không được phép" });
     return;
   }

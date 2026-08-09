@@ -1,16 +1,6 @@
 import type { SubtitleSegment } from "../../shared/types";
 import { mapTranslations } from "../../shared/segments";
-import { inferSourceLanguage, translateWithBrowser } from "../translation/browser-translator";
-
-function normalizedText(text: string): string {
-  return text.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-}
-
-function isUsableTranslation(sourceText: string, translatedText: string): boolean {
-  const translated = translatedText.trim();
-  if (!translated) return false;
-  return inferSourceLanguage(sourceText) === "vi" || normalizedText(sourceText) !== normalizedText(translated);
-}
+import { translateWithBrowser } from "../translation/browser-translator";
 
 async function googleTranslate(text: string, signal?: AbortSignal): Promise<string> {
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=vi&dt=t&q=${encodeURIComponent(text)}`;
@@ -79,11 +69,7 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
   const cached = cache ? await cachePost<{ segments?: Array<{ id: string; translatedText: string }> }>({
     action: "translations:get", sourceLanguage: cache.sourceLanguage, targetLanguage: "vi", segments: requested,
   }, signal) : undefined;
-  const sourceById = new Map(segments.map((item) => [item.id, item.sourceText]));
-  const cachedById = new Map((cached?.segments ?? []).flatMap((item) => {
-    const sourceText = sourceById.get(item.id);
-    return sourceText && isUsableTranslation(sourceText, item.translatedText) ? [[item.id, item.translatedText] as const] : [];
-  }));
+  const cachedById = new Map((cached?.segments ?? []).map((item) => [item.id, item.translatedText]));
   const missing = segments.filter((segment) => !cachedById.has(segment.id));
   let translatedMissing: SubtitleSegment[] = [];
   if (missing.length) {
@@ -96,10 +82,7 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
         }, signal);
         const expected = new Set(batch.map((segment) => segment.id));
         if (result.segments.length !== batch.length || new Set(result.segments.map((item) => item.id)).size !== batch.length
-          || result.segments.some((item) => {
-            const source = batch.find((segment) => segment.id === item.id)?.sourceText;
-            return !source || !expected.has(item.id) || !isUsableTranslation(source, item.translatedText ?? "");
-          })) {
+          || result.segments.some((item) => !expected.has(item.id) || !item.translatedText?.trim())) {
           throw new Error("Groq trả thiếu hoặc sai ánh xạ bản dịch");
         }
         return mapTranslations(batch, result.segments);
@@ -134,9 +117,7 @@ export async function translateSegments(segments: SubtitleSegment[], signal?: Ab
       segments: translatedMissing.map((segment) => ({ sourceText: segment.sourceText, translatedText: segment.translatedText ?? segment.sourceText })),
     }).catch(() => undefined);
   }
-  const translatedById = new Map(translatedMissing.flatMap((segment) =>
-    segment.translatedText && isUsableTranslation(segment.sourceText, segment.translatedText)
-      ? [[segment.id, segment.translatedText] as const] : []));
+  const translatedById = new Map(translatedMissing.map((segment) => [segment.id, segment.translatedText ?? segment.sourceText]));
   return segments.flatMap((segment) => {
     const translatedText = cachedById.get(segment.id) ?? translatedById.get(segment.id);
     return translatedText ? [{ ...segment, translatedText }] : [];

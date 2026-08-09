@@ -3,24 +3,6 @@ import type { SubtitleSegment } from "../shared/types";
 import { DEFAULT_VOICE_ID, EDGE_VOICES, VOICE_STORAGE_KEY, isKnownVoice, voiceOption } from "../shared/voices";
 import { parseVideoIdFromUrl, selectChangedSegments } from "./subtitle-editor";
 import "./popup.css";
-import "./popup-model.css";
-
-interface PopupTranslator { destroy?(): void }
-interface PopupTranslatorFactory {
-  create(options: { sourceLanguage: string; targetLanguage: string }): Promise<PopupTranslator>;
-}
-function prepareTranslationPacksFromGesture(): Promise<void> {
-  const factory = (globalThis as typeof globalThis & { Translator?: PopupTranslatorFactory }).Translator;
-  if (!factory) return Promise.reject(new Error("Trình duyệt chưa hỗ trợ Translator API"));
-  const downloads = ["en", "zh"].map((sourceLanguage) => {
-    try {
-      return factory.create({ sourceLanguage, targetLanguage: "vi" }).then((translator) => { translator.destroy?.(); });
-    } catch (error) { return Promise.reject(error); }
-  });
-  return Promise.allSettled(downloads).then((results) => {
-    if (results.every((result) => result.status === "rejected")) throw (results[0] as PromiseRejectedResult).reason;
-  });
-}
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
@@ -28,14 +10,13 @@ if (!app) throw new Error("Không tìm thấy vùng giao diện");
 app.innerHTML = `
   <header><img class="brand-mark" src="/PXH.jpg" alt="PXH logo"><div><h1>PXH Dubbing YooToob</h1><p>Realtime Vietnamese AI dubbing</p></div></header>
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
-  <section class="model-card"><div><span>NHẬN DẠNG LOCAL</span><strong id="modelStatus">Đang kiểm tra model…</strong></div><div class="model-progress"><i id="modelProgress"></i></div><button id="modelRetry" type="button" hidden>Thử tải lại</button></section>
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong id="voiceLabel">Nam Minh (nam)</strong></div>
     <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Sherpa → Whisper</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Groq Whisper</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="voice-card"><div><span>Giọng đọc</span><select id="voiceSelect" aria-label="Chọn giọng đọc"></select></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
@@ -59,71 +40,41 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 let tab: chrome.tabs.Tab | undefined;
 let currentState: ExtensionState | undefined;
 let toggling = false;
-let modelState: "loading" | "ready" | "error" = "loading";
-let modelProgress = 0;
-
-function isSupportedVideoPage(url?: string): boolean {
-  return typeof url === "string" && /^https?:\/\//i.test(url);
-}
+let subtitleAvailability: "checking" | "available" | "unavailable" = "checking";
 
 async function ensureDubbingContent(tabId: number): Promise<ExtensionState> {
   try {
     return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
   } catch {
-    const target = await chrome.tabs.get(tabId);
-    if (target.url?.startsWith("https://www.youtube.com/watch")) {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
-    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"], world: "ISOLATED" });
     try {
       return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
     } catch (error) {
       const detail = error instanceof Error ? `: ${error.message}` : "";
-      throw new Error(`Không thể khởi tạo PXH Dubbing trên trang video${detail}`);
+      throw new Error(`Không thể khởi tạo PXH Dubbing trên tab YouTube${detail}`);
     }
   }
 }
 
 function render(state?: ExtensionState): void {
-  const value = state ?? { enabled: false, status: "idle", message: "Mở một trang có video", processedSegments: 0, source: "—" };
+  const value = state ?? { enabled: false, status: "idle", message: "Mở một video YouTube", processedSegments: 0, source: "—" };
   currentState = value;
-  query("#status").textContent = value.message;
+  const validVideo = Boolean(tab?.id && tab.url?.startsWith("https://www.youtube.com/watch"));
+  const subtitleMessage = subtitleAvailability === "checking"
+    ? "Đang kiểm tra transcript/subtitle…"
+    : "Video không có transcript hoặc subtitle";
+  query("#status").textContent = !value.enabled && validVideo && subtitleAvailability !== "available"
+    ? subtitleMessage
+    : value.message;
   query("#source").textContent = value.source;
   query("#count").textContent = `${value.processedSegments} đoạn`;
   query("#statusDot").className = `status-dot ${value.status}`;
   const toggle = query<HTMLButtonElement>("#dubbingToggle");
-  toggle.disabled = toggling || modelState !== "ready" || !tab?.id || !isSupportedVideoPage(tab.url);
+  toggle.disabled = toggling || !validVideo || (!value.enabled && subtitleAvailability !== "available");
   toggle.dataset.active = String(value.enabled);
-  toggle.textContent = toggling ? "Đang chuẩn bị…" : modelState === "loading" ? `Đang tải model ${modelProgress}%` : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
+  toggle.textContent = toggling ? "Đang chuẩn bị…" : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
 }
-
-function renderModel(message = ""): void {
-  query("#modelStatus").textContent = modelState === "ready" ? "Sẵn sàng — đã lưu trên máy" : modelState === "error" ? (message || "Không tải được model") : `Đang tải dữ liệu nhận dạng: ${modelProgress}%`;
-  query<HTMLElement>("#modelProgress").style.width = `${modelProgress}%`;
-  query<HTMLElement>("#modelProgress").parentElement?.classList.toggle("error", modelState === "error");
-  query<HTMLButtonElement>("#modelRetry").hidden = modelState !== "error";
-  render(currentState);
-}
-
-async function refreshModelStatus(): Promise<void> {
-  const result = await chrome.runtime.sendMessage({ action: "local-model-status" }) as { ok?: boolean; ready?: boolean; progress?: number; message?: string };
-  modelProgress = Math.max(0, Math.min(100, result.progress ?? 0));
-  modelState = result.ready ? "ready" : result.ok === false || result.message ? "error" : "loading";
-  renderModel(result.message);
-}
-
-query<HTMLButtonElement>("#modelRetry").addEventListener("click", () => {
-  modelState = "loading"; modelProgress = 0; renderModel();
-  void chrome.runtime.sendMessage({ action: "local-model-init", tabId: tab?.id }).then(() => refreshModelStatus());
-});
-
-const modelPoll = window.setInterval(() => {
-  if (modelState === "loading") void refreshModelStatus().catch(() => undefined);
-  else if (modelState === "ready") window.clearInterval(modelPoll);
-}, 500);
-void refreshModelStatus().catch((error: unknown) => {
-  modelState = "error"; renderModel(error instanceof Error ? error.message : "Không đọc được trạng thái model");
-});
 
 const keyInput = query<HTMLInputElement>("#groqKey");
 const defaultKeyButton = query<HTMLButtonElement>("#useDefault");
@@ -195,21 +146,22 @@ void renderKeyState();
 
 query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
   if (toggling || !tab?.id) return;
-  // Phải gọi đồng bộ từ click; sau một await Chromium/Brave có thể thu hồi user gesture.
-  const streamIdPromise = currentState?.enabled ? undefined : chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-  const translationPackPromise = currentState?.enabled ? undefined : prepareTranslationPacksFromGesture();
   toggling = true; render(currentState);
   void (async () => {
     const liveState = await ensureDubbingContent(tab!.id!);
     if (liveState.enabled) {
       return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
-    // Chuẩn bị language pack local; pipeline transcript vẫn có cloud fallback.
-    void translationPackPromise?.catch(() => undefined);
-    const streamId = await streamIdPromise;
-    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, streamId, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
-    const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 1, sourceVolume: 0.08 }) as ExtensionState;
-    if (result.source.includes("streaming") && !capture?.ok) {
+    // Start any browser-managed language-pack download during the user's click.
+    // This is best-effort and never blocks the normal Groq/cache path.
+    void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
+    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
+    if (!capture?.ok && capture?.message) {
+      // Permission error — show immediately.
+      throw new Error(capture.message);
+    }
+    const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
+    if (result.source.startsWith("Whisper") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);
       throw new Error(capture?.message ?? "Không thể cấp quyền thu âm tab");
     }
@@ -222,9 +174,16 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
 
 void activeTab().then(async (active) => {
   tab = active;
-  if (!tab?.id || !isSupportedVideoPage(tab.url)) { render(); return; }
-  try { render(await ensureDubbingContent(tab.id)); }
+  if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
+  try {
+    const contentState = await ensureDubbingContent(tab.id);
+    render(contentState);
+    const availability = await chrome.tabs.sendMessage(tab.id, { action: "subtitle-availability" }) as { available?: boolean };
+    subtitleAvailability = availability?.available ? "available" : "unavailable";
+    render(contentState);
+  }
   catch (error) {
+    subtitleAvailability = "unavailable";
     render({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Không thể khởi tạo extension", processedSegments: 0, source: "—" });
   }
 });
