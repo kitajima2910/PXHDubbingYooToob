@@ -148,7 +148,16 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
   // lọt ngược vào audio nhận dạng. Luồng transcript dùng MP3 Nam Minh ổn định,
   // có duration thật để scheduler căn tốc độ chính xác hơn.
   if (whisperMode) {
-    scheduler?.addSpeech(segment, text);
+    if (chromeTtsAvailable) {
+      scheduler?.addSpeech(segment, text);
+      return;
+    }
+    const speech = await createSpeech(text, 1, signal, currentVoiceId);
+    const video = document.querySelector<HTMLVideoElement>("video");
+    const nowMs = (video?.currentTime ?? 0) * 1000;
+    const shiftMs = Math.max(0, Math.round(nowMs + 350 - segment.startMs));
+    const liveSegment = shiftMs > 0 ? { ...segment, startMs: segment.startMs + shiftMs, endMs: segment.endMs + shiftMs } : segment;
+    scheduler?.add(liveSegment, speech);
     return;
   }
   try {
@@ -284,6 +293,15 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   }
   update({ status: "translating", message: "Đang dịch giọng nói" });
   const translated = await translateForVideo(segments, signal);
+  // Dịch fallback trên Brave có thể mất lâu hơn cửa sổ phát đã tính trước đó.
+  // Dời cả cụm tới tương lai nhưng giữ nguyên khoảng cách tương đối giữa các câu.
+  const firstTranslatedStart = translated[0]?.startMs ?? 0;
+  const scheduleShiftMs = Math.max(0, Math.round(video.currentTime * 1000 + 500 - firstTranslatedStart));
+  const scheduledTranslations = scheduleShiftMs > 0 ? translated.map((segment) => ({
+    ...segment,
+    startMs: segment.startMs + scheduleShiftMs,
+    endMs: segment.endMs + scheduleShiftMs,
+  })) : translated;
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   const prepare = async (segment: SubtitleSegment): Promise<void> => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
@@ -297,7 +315,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   };
   // Câu đầu phải vào scheduler trước. Nếu tạo tất cả TTS song song, câu sau có
   // thể hoàn thành trước và phát trước, làm câu đầu hết slot rồi bị bỏ.
-  const [first, ...remaining] = translated;
+  const [first, ...remaining] = scheduledTranslations;
   if (first) await prepare(first);
   await Promise.all(remaining.map(prepare));
   if (!signal.aborted) update({ status: "ready", message: "Đang lồng tiếng bằng Whisper" });
@@ -384,9 +402,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   const stored = await chrome.storage.local.get(VOICE_STORAGE_KEY);
   const rawVoice = stored[VOICE_STORAGE_KEY];
   currentVoiceId = typeof rawVoice === "string" && isKnownVoice(rawVoice) ? rawVoice : DEFAULT_VOICE_ID;
-  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => whisperMode
-    ? Promise.reject(new Error("Chế độ local không gọi TTS cloud"))
-    : createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
+  scheduler = new AudioScheduler(video, sourceVolume,
+    (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });

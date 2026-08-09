@@ -234,3 +234,44 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Whisper tiny tự nhận diện ngôn ngữ từ từng đoạn audio ngắn; video đa ngôn ngữ hoặc âm thanh khó vẫn có thể nhận dạng sai câu nguồn.
+
+## Fix đã xử lý nhưng không phát dubbing — 2026-08-09
+
+### Đã thay đổi
+- Xác định timestamp được neo trước bước dịch; fallback trên Brave hoàn thành muộn khiến scheduler coi câu đã hết hạn dù bộ đếm vẫn tăng.
+- Sau khi dịch xong, dời toàn bộ cụm câu tới trước thời điểm video hiện tại 500 ms và giữ nguyên khoảng cách tương đối giữa các câu.
+- Bộ đếm xử lý và cửa sổ phát giờ dùng cùng các segment đã được neo lại.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension và xác nhận âm thanh TTS thực tế trên Brave.
+
+## Fix Brave chỉ nghe tiếng Anh và lệch thời gian — 2026-08-09
+
+### Đã thay đổi
+- Xác định tiếng Anh người dùng nghe là âm thanh gốc; Chrome TTS/Web Speech không có giọng Việt và Edge TTS đang bị cấm trong Whisper mode.
+- Cho phép Edge TTS miễn phí làm fallback khi máy không có `chrome.tts` tiếng Việt.
+- Sau khi Edge TTS tạo xong audio, neo lại segment lần cuối về trước thời điểm video hiện tại 350 ms để không bị scheduler bỏ vì hết hạn.
+- Máy có Chrome TTS tiếng Việt vẫn ưu tiên TTS local như trước.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Edge TTS cần mạng và có thêm độ trễ tạo audio; đây là fallback cho Brave không cài giọng Việt local.
