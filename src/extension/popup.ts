@@ -5,6 +5,23 @@ import { parseVideoIdFromUrl, selectChangedSegments } from "./subtitle-editor";
 import "./popup.css";
 import "./popup-model.css";
 
+interface PopupTranslator { destroy?(): void }
+interface PopupTranslatorFactory {
+  create(options: { sourceLanguage: string; targetLanguage: string }): Promise<PopupTranslator>;
+}
+function prepareTranslationPacksFromGesture(): Promise<void> {
+  const factory = (globalThis as typeof globalThis & { Translator?: PopupTranslatorFactory }).Translator;
+  if (!factory) return Promise.reject(new Error("Trình duyệt chưa hỗ trợ Translator API"));
+  const downloads = ["en", "zh"].map((sourceLanguage) => {
+    try {
+      return factory.create({ sourceLanguage, targetLanguage: "vi" }).then((translator) => { translator.destroy?.(); });
+    } catch (error) { return Promise.reject(error); }
+  });
+  return Promise.allSettled(downloads).then((results) => {
+    if (results.every((result) => result.status === "rejected")) throw (results[0] as PromiseRejectedResult).reason;
+  });
+}
+
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
 
@@ -180,6 +197,7 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
   if (toggling || !tab?.id) return;
   // Phải gọi đồng bộ từ click; sau một await Chromium/Brave có thể thu hồi user gesture.
   const streamIdPromise = currentState?.enabled ? undefined : chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+  const translationPackPromise = currentState?.enabled ? undefined : prepareTranslationPacksFromGesture();
   toggling = true; render(currentState);
   void (async () => {
     const liveState = await ensureDubbingContent(tab!.id!);
@@ -187,11 +205,11 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
       return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
     // Chuẩn bị language pack local; pipeline transcript vẫn có cloud fallback.
-    void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
+    void translationPackPromise?.catch(() => undefined);
     const streamId = await streamIdPromise;
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, streamId, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 1, sourceVolume: 0.08 }) as ExtensionState;
-    if (result.source.startsWith("Whisper") && !capture?.ok) {
+    if (result.source.includes("streaming") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);
       throw new Error(capture?.message ?? "Không thể cấp quyền thu âm tab");
     }

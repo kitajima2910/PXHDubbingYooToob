@@ -42,6 +42,7 @@ let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 1;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 let browserTranslatorUnavailable = false;
+let browserTranslatorRetryAt = 0;
 let liveCaption: HTMLDivElement | undefined;
 let liveCaptionCollapsed = false;
 let streamingPartialTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -205,10 +206,13 @@ function update(patch: Partial<ExtensionState>): void { state = { ...state, ...p
 function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
 async function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
   if (whisperMode) {
-    if (!browserTranslatorUnavailable) {
+    if (!browserTranslatorUnavailable && Date.now() >= browserTranslatorRetryAt) {
       try { return await translateWithBrowser(segments); }
       catch (error) {
-        browserTranslatorUnavailable = true;
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        const modelPending = /user gesture|downloading|downloadable|notallowed/i.test(message);
+        if (modelPending) browserTranslatorRetryAt = Date.now() + 10_000;
+        else browserTranslatorUnavailable = /chưa hỗ trợ|unavailable|không có model/i.test(message);
         console.info("PXHDubbingYooToob: Translator API không khả dụng, chuyển sang dịch fallback", error);
       }
     }
@@ -572,7 +576,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
-  update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
+  update({ enabled: true, status: "loading", message: "Đang kiểm tra subtitle (tối đa 1 giây)", processedSegments: 0 });
   try {
     if (!isYouTubeWatchPage()) {
       await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
@@ -591,36 +595,29 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     let useBackend = false;
     let completeTranscript = false;
     try {
-      captions = await loadYouTubeCaptions();
+      captions = await loadYouTubeCaptions(1_000);
       completeTranscript = true;
       void saveCachedTranscript(cacheContext(), captions.source, captions.segments, true).catch(() => undefined);
     }
     catch (bridgeError) {
-      useBackend = true;
-      try {
-        captions = await loadBackendCaptions(currentVideoId, Math.round(video.currentTime * 1000), Math.round(video.currentTime * 1000) + 60_000, sessionController.signal);
-      } catch (backendError) {
-        const cached = await loadCachedTranscript(cacheContext(), undefined, undefined, sessionController.signal);
-        if (cached?.complete && cached.segments.length) {
-          captions = { segments: cached.segments, source: "Neon cache — đồng bộ" };
-          useBackend = false;
-          completeTranscript = true;
-        } else {
-          // Giảm riêng video xuống 8%; output tabCapture phải giữ 100% để không hạ luôn TTS.
-          await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
-          scheduler.start();
-          const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript"; console.info(`PXHDubbingYooToob: chuyen sang Whisper (${reason})`);
-          whisperMode = true;
-          const caption = ensureLiveCaption();
-          const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
-          if (captionText) captionText.textContent = "Đang nghe…";
-          caption.hidden = false;
-          update({ enabled: true, status: "ready", message: "Đang nghe video realtime", source: "Sherpa streaming → Whisper fallback" });
-          await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
-          if (resumeWhenReady) void video.play().catch(() => undefined);
-          return state;
-        }
-      }
+      await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
+      scheduler.start();
+      const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript";
+      console.info(`PXHDubbingYooToob: video không có subtitle, dùng audio streaming (${reason})`);
+      whisperMode = true;
+      const caption = ensureLiveCaption();
+      const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
+      if (captionText) captionText.textContent = "Video không có subtitle — đang nhận dạng audio…";
+      caption.hidden = false;
+      update({
+        enabled: true,
+        status: "ready",
+        message: "Video không có subtitle — đang dùng nhận dạng audio",
+        source: "Audio streaming — không có subtitle",
+      });
+      await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+      if (resumeWhenReady) void video.play().catch(() => undefined);
+      return state;
     }
     if (!completeTranscript && captions.segments.length) {
       void saveCachedTranscript(cacheContext(), captions.source, captions.segments, false).catch(() => undefined);

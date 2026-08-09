@@ -526,3 +526,71 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Transcript DOM giúp đồng bộ trạng thái/timestamp và không mất segment, nhưng độ trễ dịch Việt trên Brave vẫn phụ thuộc Google Translate fallback qua mạng.
+
+## Fix Translator API yêu cầu user gesture — 2026-08-09
+
+### Đã thay đổi gì
+- Nguyên nhân gốc của `NotAllowedError`: popup chuyển yêu cầu chuẩn bị model sang content script qua message, nhưng Chromium không truyền user activation qua message; `Translator.create()` vì thế bị từ chối khi model ở trạng thái `downloadable/downloading`.
+- Popup giờ gọi trực tiếp `Translator.create()` cho `en → vi` và `zh → vi` ngay trong callback click `Bắt đầu lồng tiếng`, song song với `tabCapture.getMediaStreamId()`.
+- Không `await availability()` trước `create()`, tránh mất user gesture giữa hai lượt microtask.
+- Content script không còn đánh dấu Translator API hỏng vĩnh viễn khi lỗi chỉ là model đang tải; nó chờ 10 giây rồi thử local Translator lại, trong thời gian đó vẫn dùng Google Translate fallback.
+- Giữ content script standalone; logic gesture nhỏ được đặt trong popup để Vite không tạo shared chunk.
+
+### File đã sửa
+- `src/extension/popup.ts`
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 59/59 test pass, 12/12 file.
+- `npx.cmd vite build`: pass; `content.js` vẫn standalone.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Nếu Brave không cung cấp model trực tiếp `zh/en → vi`, các lượt tải có thể bị từ chối và pipeline vẫn dùng Google Translate fallback; đây là giới hạn model của trình duyệt.
+
+## Một pipeline audio streaming cho mọi video — 2026-08-09
+
+### Đã thay đổi gì
+- Bỏ bước chờ `loadYouTubeCaptions()`/backend/cache khỏi đường khởi động dubbing mặc định.
+- Mọi video YouTube và HTML5 giờ bắt đầu ngay bằng `tabCapture → AudioWorklet → Sherpa/Whisper → LiveTranscriptStore → Translate VI → TTS`.
+- Không còn log/chờ `Quá thời gian chờ phụ đề YouTube` trước khi extension bắt đầu nghe audio.
+- Popup xác định lỗi capture dựa trên source streaming thống nhất, tránh báo đang chạy khi `tabCapture` thất bại.
+- Code transcript/cache cũ được giữ nguyên cho khả năng dùng lại ở chế độ offline tương lai, nhưng không còn được gọi trong start mặc định.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 59/59 test pass, 12/12 file.
+- `npx.cmd vite build`: pass.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Việc thống nhất pipeline loại bỏ thời gian dò/chuyển mode nhưng video vốn có transcript DOM sẽ không còn lợi thế dịch/TTS trước timeline; độ trễ giờ đồng nhất với pipeline audio streaming.
+
+## Hybrid nhanh: DOM 1 giây → audio streaming — 2026-08-09
+
+### Đã thay đổi gì
+- Khôi phục pipeline transcript DOM cho video YouTube có subtitle để giữ chất lượng đồng bộ/dịch trước timeline như bản ổn định cũ.
+- Giới hạn `loadYouTubeCaptions()` còn tối đa 1 giây thay vì chờ dài rồi mới fallback.
+- Nếu không có subtitle sau 1 giây, bỏ qua hoàn toàn backend caption và Neon cache; chuyển ngay sang audio streaming.
+- Thông báo rõ trong popup và overlay: `Video không có subtitle — đang dùng nhận dạng audio`.
+- Video HTML5 ngoài YouTube tiếp tục đi thẳng audio streaming, không thực hiện bước dò YouTube.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 59/59 test pass, 12/12 file.
+- `npx.cmd vite build`: pass.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- YouTube có thể phản hồi caption chậm hơn 1 giây trên máy/mạng rất chậm; trường hợp đó sẽ được coi là không subtitle và dùng audio streaming trong phiên hiện tại.
