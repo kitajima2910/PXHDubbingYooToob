@@ -28,6 +28,7 @@ let whisperInitialPauseDone = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let availableCaptions: { videoId: string; segments: SubtitleSegment[]; source: string } | undefined;
+let observedPageVideoId = videoId();
 let seekVersion = 0;
 let scheduledEndMs = 0;
 let trainingRecorder: MediaRecorder | undefined;
@@ -434,9 +435,14 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   }
   if (request.action === "status") { respond(state); return; }
   if (request.action === "subtitle-availability") {
+    const requestedVideoId = videoId();
     void loadYouTubeCaptions().then(
       (captions) => {
-        availableCaptions = { videoId: videoId(), segments: captions.segments, source: captions.source };
+        if (!requestedVideoId || videoId() !== requestedVideoId) {
+          respond({ available: false, message: "YouTube đang chuyển video" });
+          return;
+        }
+        availableCaptions = { videoId: requestedVideoId, segments: captions.segments, source: captions.source };
         respond({ available: captions.segments.length > 0, source: captions.source });
       },
       () => {
@@ -510,4 +516,23 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   return true;
 });
 
-setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
+function resetForVideoNavigation(): void {
+  const nextVideoId = videoId();
+  availableCaptions = undefined;
+  if (state.enabled || scheduler || controller) void stop();
+  currentVideoId = "";
+  observedPageVideoId = nextVideoId;
+  update({ enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" });
+}
+
+document.addEventListener("yt-navigate-start", resetForVideoNavigation);
+document.addEventListener("yt-navigate-finish", () => {
+  if (videoId() !== observedPageVideoId) resetForVideoNavigation();
+});
+window.addEventListener("popstate", () => window.setTimeout(resetForVideoNavigation, 0));
+
+setInterval(() => {
+  if (videoId() !== observedPageVideoId || (state.enabled && currentVideoId && videoId() !== currentVideoId)) {
+    resetForVideoNavigation();
+  }
+}, 1000);

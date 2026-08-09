@@ -134,3 +134,25 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần nghe thử thực tế sau khi reload extension để xác nhận điểm cân bằng mới.
+
+## Fix chuyển video nhưng vẫn lồng tiếng video cũ — 2026-08-09
+
+### Đã thay đổi gì
+- Xác định nguyên nhân gốc là điều hướng SPA của YouTube giữ nguyên content script và transcript đã kiểm tra của video trước.
+- Dừng scheduler/TTS ngay khi nhận `yt-navigate-start`, thay vì chờ bộ dò URL tối đa một giây.
+- Xóa transcript khả dụng, video ID phiên cũ và trạng thái xử lý khi chuyển video.
+- Chỉ lưu kết quả kiểm tra subtitle nếu video ID vẫn giống thời điểm bắt đầu yêu cầu; kết quả bridge cũ trả về muộn sẽ bị loại.
+- Bổ sung `yt-navigate-finish`, `popstate` và bộ dò URL làm các lớp dự phòng.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 53/53 test pass, 10/10 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần kiểm tra trực tiếp thao tác bấm video đề xuất/Next trong YouTube sau khi reload extension.
