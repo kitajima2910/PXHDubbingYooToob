@@ -69,3 +69,41 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Chưa thể chạy thử trực tiếp trên một video YouTube không có transcript DOM trong phiên terminal; cần reload extension và kiểm tra thực tế trên trình duyệt để đánh giá chất lượng nhận dạng của Whisper theo nội dung/âm thanh video.
+
+## Whisper local miễn phí — 2026-08-09
+
+### Đã thay đổi
+- Model `onnx-community/whisper-tiny` multilingual tự tải khi content script khởi tạo, dùng Cache API của Transformers.js và chỉ tải lại khi cache/model thay đổi.
+- Overlay trên trang YouTube hiển thị tiến trình model, trạng thái sẵn sàng, thử lại và nút bắt đầu lồng tiếng.
+- Thay MediaRecorder/WebM trong nhánh dubbing trực tiếp bằng AudioWorklet xuất PCM mono 16 kHz theo frame 100 ms.
+- Thêm VAD: pre-roll 300 ms, kết câu sau 600 ms im lặng, giới hạn câu 8 giây để giữ độ trễ.
+- Whisper chạy trong Worker, ưu tiên WebGPU và fallback WASM một thread tương thích Manifest V3.
+- Video không transcript dùng Chrome Translator và Chrome/Web Speech TTS local; không gọi Groq STT, Google Translate hay TTS cloud trong nhánh local.
+- Thêm backpressure: máy không theo kịp sẽ tạm dừng video khi có từ hai đoạn nhận dạng tồn đọng và tự phát lại khi hàng đợi giảm.
+- Transcript DOM/timedtext/cache và pipeline đang hoạt động được giữ nguyên.
+- Manifest yêu cầu Chrome 138, bật CSP WebAssembly, đóng gói WASM/Worker và chỉ cho tải model data từ Hugging Face.
+
+### File đã sửa/thêm
+- `package.json`, `package-lock.json`
+- `public/manifest.json`
+- `src/extension/local-stt/pcm-worklet.ts`
+- `src/extension/local-stt/whisper-worker.ts`
+- `src/extension/local-stt/vad.ts`
+- `src/extension/offscreen.ts`
+- `src/extension/background.ts`
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `tests/vad.test.ts`
+- `README.md`, `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- Vite production build + API TypeScript check: pass.
+- Bundle tạo Worker Whisper, AudioWorklet và WASM local; content script vẫn standalone.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Không có Chrome/Edge kết nối trong môi trường browser test, nên chưa verify được model download, CSP/WebGPU/WASM và tabCapture end-to-end trên extension đã nạp.
+- `npm audit` báo advisory ở dependency Node-only của Transformers.js (`sharp`, `onnxruntime-node`) và các advisory build-time Vercel cũ. Các module Node-only không có trong bundle extension; upstream chưa có fix cho nhánh Transformers.js này.
+- Dubbing local là near-realtime, không thể tức thời tuyệt đối; chất lượng và việc backpressure có kích hoạt hay không phụ thuộc CPU/GPU của máy.

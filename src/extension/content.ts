@@ -10,7 +10,7 @@ function isKnownVoice(id: string): boolean {
 import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTranscript, transcribeAudio, translateSegments } from "./api/client";
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
-import { prepareBrowserTranslation } from "./translation/browser-translator";
+import { prepareBrowserTranslation, translateWithBrowser } from "./translation/browser-translator";
 
 let state: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
 let scheduler: AudioScheduler | undefined;
@@ -20,11 +20,15 @@ let currentVideoId = "";
 let whisperMode = false;
 let whisperDelaySeconds = 5;
 let whisperChunkIndex = 0;
-interface WhisperChunk { audioBase64: string; mimeType: string; durationMs: number; capturedEndMs: number }
+interface WhisperChunk {
+  audioBase64?: string; mimeType?: string; durationMs: number; capturedEndMs: number;
+  segments?: SubtitleSegment[];
+}
 let whisperProcessing = false;
 let whisperQueue: WhisperChunk[] = [];
 let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
+let resumeAfterLocalBackpressure = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
 let seekVersion = 0;
@@ -35,6 +39,10 @@ let trainingKeepAlivePort: chrome.runtime.Port | undefined;
 let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
+let localModelState: "loading" | "ready" | "error" = "loading";
+let localModelProgress = 0;
+let localModelMessage = "Đang chuẩn bị Whisper local";
+let modelOverlay: HTMLDivElement | undefined;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
@@ -44,7 +52,47 @@ function videoId(): string { return new URL(location.href).searchParams.get("v")
 function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
 function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
 function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
+  if (whisperMode) return translateWithBrowser(segments);
   return translateSegments(segments, signal, cacheContext());
+}
+
+function renderModelOverlay(): void {
+  if (!modelOverlay) return;
+  if (state.enabled) { modelOverlay.hidden = true; return; }
+  modelOverlay.hidden = false;
+  const title = modelOverlay.querySelector<HTMLElement>("[data-model-title]");
+  const detail = modelOverlay.querySelector<HTMLElement>("[data-model-detail]");
+  const button = modelOverlay.querySelector<HTMLButtonElement>("button");
+  if (title) title.textContent = localModelState === "ready" ? "PXH Dubbing đã sẵn sàng" : localModelState === "error" ? "Whisper local chưa sẵn sàng" : `Đang tải dữ liệu nhận dạng: ${localModelProgress}%`;
+  if (detail) detail.textContent = localModelState === "loading" ? "Model chỉ tải một lần và được lưu trên máy" : localModelMessage;
+  if (button) { button.disabled = localModelState === "loading"; button.textContent = localModelState === "error" ? "Thử tải lại" : "Bắt đầu lồng tiếng"; }
+}
+
+function ensureModelOverlay(): void {
+  if (modelOverlay?.isConnected) return;
+  const overlay = document.createElement("div");
+  overlay.id = "pxh-local-model-overlay";
+  overlay.style.cssText = "position:fixed;left:50%;top:82px;transform:translateX(-50%);z-index:2147483647;width:min(420px,calc(100vw - 32px));padding:16px 18px;border-radius:14px;background:rgba(12,18,30,.94);color:#fff;font:14px/1.45 system-ui;box-shadow:0 12px 38px rgba(0,0,0,.4);text-align:center";
+  overlay.innerHTML = `<strong data-model-title style="display:block;font-size:16px;margin-bottom:5px"></strong><span data-model-detail style="display:block;color:#cbd5e1;margin-bottom:12px"></span><button type="button" style="border:0;border-radius:9px;padding:9px 16px;background:#ef4444;color:white;font-weight:700;cursor:pointer"></button>`;
+  overlay.querySelector("button")?.addEventListener("click", () => {
+    if (localModelState === "error") {
+      localModelState = "loading"; localModelMessage = "Đang thử tải lại"; renderModelOverlay();
+      void chrome.runtime.sendMessage({ action: "local-model-init" }); return;
+    }
+    if (localModelState !== "ready") return;
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (!video) { localModelMessage = "Không tìm thấy video YouTube"; renderModelOverlay(); return; }
+    void chrome.runtime.sendMessage({ action: "capture-start", sourceVolume: DEFAULT_SOURCE_VOLUME }).then(
+      (capture: { ok?: boolean; message?: string }) => {
+        if (!capture?.ok) throw new Error(capture?.message ?? "Không thể thu âm tab");
+        return start(DEFAULT_DELAY_SECONDS, DEFAULT_SOURCE_VOLUME);
+      },
+    ).then(() => renderModelOverlay(), (error: unknown) => {
+      localModelMessage = error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng";
+      renderModelOverlay();
+    });
+  });
+  document.documentElement.append(overlay); modelOverlay = overlay; renderModelOverlay();
 }
 
 function speechFingerprint(text: string): string {
@@ -135,7 +183,7 @@ async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal):
   // Whisper đang thu chính tab: ưu tiên Chrome TTS nam để giọng dubbing không
   // lọt ngược vào audio nhận dạng. Luồng transcript dùng MP3 Nam Minh ổn định,
   // có duration thật để scheduler căn tốc độ chính xác hơn.
-  if (whisperMode && chromeTtsAvailable) {
+  if (whisperMode) {
     scheduler?.addSpeech(segment, text);
     return;
   }
@@ -222,16 +270,17 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
   let sourceSegments = cached?.covered ? cached.segments : [];
   const fromCache = cached?.covered === true;
   if (!fromCache) {
-    const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
-    if (signal.aborted) return;
-    // Không loại cả chunk chỉ vì Whisper nhận diện ngôn ngữ là tiếng Việt:
-    // một chunk có thể chứa đồng thời tiếng gốc và một phần TTS thu ngược.
-    // Chỉ loại đúng segment trùng với nội dung dubbing đã phát.
-    sourceSegments = result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+    if (chunk.segments) {
+      sourceSegments = chunk.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+    } else if (chunk.audioBase64 && chunk.mimeType) {
+      const result = await transcribeAudio(chunk.audioBase64, chunk.mimeType, signal);
+      if (signal.aborted) return;
+      sourceSegments = result.segments.filter((segment) => !isDubbingFeedback(segment.sourceText));
+    }
   }
   if (!sourceSegments.length) {
     if (!fromCache) {
-      await saveCachedTranscript(cacheContext(), "Groq Whisper", [], false, signal, {
+      await saveCachedTranscript(cacheContext(), "Whisper local", [], false, signal, {
         fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
       });
     }
@@ -265,7 +314,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
       startMs: capturedStartMs + segment.startMs,
       endMs: capturedStartMs + Math.max(segment.startMs + 500, segment.endMs),
     }));
-    await saveCachedTranscript(cacheContext(), "Groq Whisper", transcriptSegments, false, signal, {
+    await saveCachedTranscript(cacheContext(), "Whisper local", transcriptSegments, false, signal, {
       fromMs: capturedStartMs, toMs: chunk.capturedEndMs,
     });
   }
@@ -365,13 +414,15 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   currentVideoId = videoId();
   controller = new AbortController();
   whisperMode = false; whisperDelaySeconds = delaySeconds; whisperChunkIndex = 0; whisperProcessing = false;
-  whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  whisperQueue = []; resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false; resumeAfterLocalBackpressure = false;
   recentDubbingTexts = [];
   const sessionController = controller;
   const stored = await chrome.storage.local.get(VOICE_STORAGE_KEY);
   const rawVoice = stored[VOICE_STORAGE_KEY];
   currentVoiceId = typeof rawVoice === "string" && isKnownVoice(rawVoice) ? rawVoice : DEFAULT_VOICE_ID;
-  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
+  scheduler = new AudioScheduler(video, sourceVolume, (_segment, text) => whisperMode
+    ? Promise.reject(new Error("Chế độ local không gọi TTS cloud"))
+    : createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
@@ -436,18 +487,25 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
-  resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
+  resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false; resumeAfterLocalBackpressure = false;
   recentDubbingTexts = [];
   scheduledEndMs = 0;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
+  renderModelOverlay();
   return state;
 }
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; startMs?: number }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; capturedAt?: number; startMs?: number; type?: string; progress?: number; message?: string; segments?: SubtitleSegment[]; active?: boolean }, _sender, respond) => {
+  if (request.action === "local-model-event") {
+    if (request.type === "ready") { localModelState = "ready"; localModelProgress = 100; localModelMessage = "Model đã được lưu trên máy"; }
+    else if (request.type === "error") { localModelState = "error"; localModelMessage = request.message ?? "Không tải được Whisper local"; }
+    else { localModelState = "loading"; localModelProgress = Math.max(0, Math.min(100, request.progress ?? 0)); }
+    ensureModelOverlay(); renderModelOverlay(); respond({ ok: true }); return;
+  }
   if (request.action === "training-ready") { respond({ ok: true, videoId: videoId() }); return; }
   if (request.action === "prepare-offline-translation") {
     void prepareBrowserTranslation().then(
@@ -516,9 +574,35 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
     }
     respond({ ok: true }); return;
   }
+  if (request.action === "whisper-local-chunk") {
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (controller && video && whisperMode && request.segments) {
+      const elapsedSinceCapture = Math.max(0, Date.now() - (request.capturedAt ?? Date.now()));
+      const capturedEndMs = Math.max(0, Math.round(video.currentTime * 1000 - (!video.paused ? elapsedSinceCapture * video.playbackRate : 0)));
+      queueWhisperChunk({
+        durationMs: Math.max(500, request.durationMs ?? 1_000), capturedEndMs, segments: request.segments,
+      }, controller.signal);
+    }
+    respond({ ok: true }); return;
+  }
+  if (request.action === "whisper-local-error") {
+    if (!controller?.signal.aborted) update({ status: "ready", message: request.message ?? "Whisper local bỏ qua một đoạn audio lỗi" });
+    respond({ ok: true }); return;
+  }
+  if (request.action === "whisper-local-backpressure") {
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (video && whisperMode) {
+      if (request.active && !video.paused) { resumeAfterLocalBackpressure = true; video.pause(); update({ status: "loading", message: "Máy đang bắt kịp nhận dạng" }); }
+      else if (!request.active && resumeAfterLocalBackpressure) { resumeAfterLocalBackpressure = false; void video.play().catch(() => undefined); }
+    }
+    respond({ ok: true }); return;
+  }
   const operation = request.action === "stop" ? stop() : start(request.delaySeconds ?? DEFAULT_DELAY_SECONDS, request.sourceVolume ?? DEFAULT_SOURCE_VOLUME);
   void operation.then(respond);
   return true;
 });
 
 setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
+
+ensureModelOverlay();
+void chrome.runtime.sendMessage({ action: "local-model-init" });

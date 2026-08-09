@@ -16,7 +16,7 @@ app.innerHTML = `
     <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Groq Whisper</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Whisper local</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="voice-card"><div><span>Giọng đọc</span><select id="voiceSelect" aria-label="Chọn giọng đọc"></select></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
@@ -145,14 +145,9 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
     if (liveState.enabled) {
       return chrome.tabs.sendMessage(tab!.id!, { action: "stop" }) as Promise<ExtensionState>;
     }
-    // Start any browser-managed language-pack download during the user's click.
-    // This is best-effort and never blocks the normal Groq/cache path.
+    // Chuẩn bị language pack local; pipeline transcript vẫn có cloud fallback.
     void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
     const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
-    if (!capture?.ok && capture?.message) {
-      // Permission error — show immediately.
-      throw new Error(capture.message);
-    }
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
     if (result.source.startsWith("Whisper") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);

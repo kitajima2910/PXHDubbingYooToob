@@ -331,10 +331,15 @@ function startPlaylistTraining(value: string): void {
   });
 }
 
+let creatingOffscreen: Promise<void> | undefined;
 async function ensureOffscreenDocument(): Promise<void> {
   const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] });
   if (contexts.length) return;
-  await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: [chrome.offscreen.Reason.USER_MEDIA], justification: "Thu âm tab YouTube để nhận dạng lời nói khi video không có phụ đề" });
+  creatingOffscreen ??= chrome.offscreen.createDocument({
+    url: "offscreen.html", reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WORKERS],
+    justification: "Tải Whisper local và thu âm tab YouTube khi video không có phụ đề",
+  }).finally(() => { creatingOffscreen = undefined; });
+  await creatingOffscreen;
 }
 
 async function startTabCapture(tabId: number, sourceVolume: number): Promise<void> {
@@ -506,7 +511,34 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; text?: string; rate?: number } | null;
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
+  if (request?.action === "local-model-init") {
+    const tabId = sender.tab?.id ?? request.tabId;
+    void ensureOffscreenDocument()
+      .then(() => chrome.runtime.sendMessage({ action: "capture-offscreen-model-init", tabId }))
+      .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không khởi tạo được Whisper local" }));
+    return true;
+  }
+  if (request?.action === "local-model-event" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, {
+      action: "local-model-event", type: request.type, progress: request.progress, message: request.message,
+    }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
+  if (request?.action === "capture-local-chunk" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, {
+      action: "whisper-local-chunk", durationMs: request.durationMs, capturedAt: request.capturedAt, segments: request.segments ?? [],
+    }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
+  if (request?.action === "capture-local-error" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-local-error", message: request.message }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
+  if (request?.action === "capture-local-backpressure" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, { action: "whisper-local-backpressure", active: request.active === true }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
   if (request?.action === "playlist-train-reset") {
     playlistTrainingCancelled = true;
     playlistTrainingController?.abort();
