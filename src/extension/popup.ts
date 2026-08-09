@@ -171,6 +171,8 @@ void renderKeyState();
 
 query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
   if (toggling || !tab?.id) return;
+  // Phải gọi đồng bộ từ click; sau một await Chromium/Brave có thể thu hồi user gesture.
+  const streamIdPromise = currentState?.enabled ? undefined : chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   toggling = true; render(currentState);
   void (async () => {
     const liveState = await ensureDubbingContent(tab!.id!);
@@ -179,7 +181,8 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
     }
     // Chuẩn bị language pack local; pipeline transcript vẫn có cloud fallback.
     void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
-    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
+    const streamId = await streamIdPromise;
+    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, streamId, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
     if (result.source.startsWith("Whisper") && !capture?.ok) {
       await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);

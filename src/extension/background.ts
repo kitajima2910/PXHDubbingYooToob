@@ -342,21 +342,21 @@ async function ensureOffscreenDocument(): Promise<void> {
   await creatingOffscreen;
 }
 
-async function startTabCapture(tabId: number, sourceVolume: number): Promise<void> {
+async function startTabCapture(tabId: number, sourceVolume: number, grantedStreamId?: string): Promise<void> {
   await ensureOffscreenDocument();
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  const streamId = grantedStreamId ?? await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   const response = await chrome.runtime.sendMessage({ action: "capture-offscreen-start", streamId, tabId, sourceVolume }) as { ok?: boolean; message?: string };
   if (!response?.ok) throw new Error(response?.message ?? "Không thể bắt đầu thu âm tab");
 }
 
-async function ensureTabCapture(tabId: number, sourceVolume: number): Promise<void> {
+async function ensureTabCapture(tabId: number, sourceVolume: number, grantedStreamId?: string): Promise<void> {
   await ensureOffscreenDocument();
   const status = await chrome.runtime.sendMessage({ action: "capture-offscreen-status" }) as { active?: boolean; tabId?: number } | undefined;
   if (status?.active && status.tabId === tabId) {
     await chrome.runtime.sendMessage({ action: "capture-offscreen-volume", sourceVolume });
     return;
   }
-  await startTabCapture(tabId, sourceVolume);
+  await startTabCapture(tabId, sourceVolume, grantedStreamId);
 }
 
 async function stopTabCapture(): Promise<void> {
@@ -511,7 +511,7 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; streamId?: string; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
   if (request?.action === "local-model-init") {
     const tabId = sender.tab?.id ?? request.tabId;
     void ensureOffscreenDocument()
@@ -562,7 +562,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     const targetTabId = sender.tab?.id ?? request.tabId;
     if (targetTabId === undefined) { respond({ ok: false, message: "Không xác định được tab YouTube" }); return; }
     const sourceVolume = request.sourceVolume ?? 0.08;
-    void ensureTabCapture(targetTabId, sourceVolume).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
+    void ensureTabCapture(targetTabId, sourceVolume, request.streamId).then(() => respond({ ok: true }), (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không thể thu âm tab" }));
     return true;
   }
   if (request?.action === "capture-stop") {

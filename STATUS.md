@@ -152,3 +152,24 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần reload extension và xác nhận trực tiếp phần trăm tải model trong popup Chrome.
+
+## Fix tabCapture trên Chromium/Brave — 2026-08-09
+
+### Đã thay đổi
+- Chuyển `chrome.tabCapture.getMediaStreamId()` từ service worker sang gọi đồng bộ ngay trong sự kiện click của popup.
+- Popup chuyển stream ID đã được người dùng cấp sang background/offscreen; tránh mất `user gesture` sau các thao tác bất đồng bộ.
+- Background vẫn giữ đường fallback cũ cho các caller khác.
+
+### File đã sửa
+- `src/extension/popup.ts`
+- `src/extension/background.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension và xác nhận capture thực tế trên Brave.
