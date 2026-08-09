@@ -537,6 +537,24 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     }).catch(() => undefined);
     respond({ ok: true }); return;
   }
+  if (request?.action === "capture-local-partial" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, {
+      action: "streaming-local-partial", text: request.text,
+    }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
+  if (request?.action === "capture-local-stable" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, {
+      action: "streaming-local-stable", text: request.text,
+    }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
+  if (request?.action === "capture-local-final" && request.tabId !== undefined) {
+    void chrome.tabs.sendMessage(request.tabId, {
+      action: "streaming-local-final", text: request.text, durationMs: request.durationMs, capturedAt: request.capturedAt,
+    }).catch(() => undefined);
+    respond({ ok: true }); return;
+  }
   if (request?.action === "capture-local-error" && request.tabId !== undefined) {
     void chrome.tabs.sendMessage(request.tabId, { action: "whisper-local-error", message: request.message }).catch(() => undefined);
     respond({ ok: true }); return;

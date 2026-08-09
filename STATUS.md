@@ -387,3 +387,90 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Nếu một inference WebGPU duy nhất vẫn tranh GPU với giải mã video trên máy yếu, cần thêm lựa chọn CPU q8 trong popup; CPU sẽ mượt hình hơn nhưng STT chậm hơn.
+
+## Sherpa streaming kiểu Google Meet — 2026-08-09
+
+### Đã thay đổi gì
+- Tích hợp artifact chính thức `sherpa-onnx` WebAssembly SIMD và model Zipformer song ngữ Trung–Anh vào extension; model nằm trong gói cài và chỉ nạp local, không dùng STT server hay phí theo phút.
+- AudioWorklet đẩy PCM 16 kHz liên tục vào online recognizer; kết quả partial được phát ngay thay vì chờ VAD đóng chunk 5 giây.
+- Partial được throttle 350 ms, dịch sang tiếng Việt và cập nhật floating Live Caption; chỉ endpoint final mới đi qua dịch/TTS để tránh đọc lặp từng phần câu.
+- Không pause video khi nhận dạng. Nếu sherpa/WASM không khởi tạo trong 20 giây, pipeline tự lùi về Whisper multilingual hiện có.
+- Đổi nhãn popup thành `NHẬN DẠNG LOCAL` và hiển thị thứ tự `DOM → Sherpa → Whisper`.
+- Giữ license Apache-2.0 của sherpa-onnx trong thư mục asset.
+
+### File đã sửa
+- `offscreen.html`
+- `public/sherpa/bootstrap.js`
+- `public/sherpa/sherpa-onnx-asr.js`
+- `public/sherpa/sherpa-onnx-wasm-main-asr.js`
+- `public/sherpa/sherpa-onnx-wasm-main-asr.wasm`
+- `public/sherpa/sherpa-onnx-wasm-main-asr.data`
+- `public/sherpa/LICENSE`
+- `src/extension/offscreen.ts`
+- `src/extension/background.ts`
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `package.json`
+- `public/manifest.json`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npm.cmd run build`: pass; version build `0.2.15`; `dist/sherpa` chứa đủ JS/WASM/data.
+
+### Vấn đề còn lại
+- Model streaming đang dùng là bản chính thức Trung–Anh, phù hợp video tiếng Trung/Anh. Ngôn ngữ khác vẫn cần Whisper fallback; chưa thể cam kết mọi ngôn ngữ có partial 0.5–1 giây.
+- Asset sherpa khoảng 211 MB, làm gói extension lớn và dùng thêm RAM khi nạp. Cần benchmark trực tiếp trên Brave/máy yếu; kiểm tra tự động hiện không đo được độ trễ audio/TTS thực tế.
+- Dịch fallback và Edge/Chrome TTS vẫn có thể thêm độ trễ mạng hoặc hàng đợi; STT streaming không thể tự loại bỏ phần trễ đó.
+
+## Partial TTS đuổi theo âm thanh gốc — 2026-08-09
+
+### Đã thay đổi gì
+- Không còn bắt buộc chờ endpoint final mới bắt đầu TTS trong chế độ Sherpa streaming.
+- So sánh hai hypothesis liên tiếp để chỉ commit phần prefix đã ổn định; ngưỡng hiện tại là khoảng 6 ký tự CJK hoặc 3 từ Latin, có ưu tiên dấu câu.
+- Dịch và phát ngay từng phần đã commit; final chỉ gửi phần đuôi chưa đọc, tránh đọc lại toàn bộ câu.
+- Các stable partial đến trong lúc bản dịch trước đang xử lý được gộp thành một lượt tiếp theo, tránh hàng đợi tăng vô hạn.
+- Live Caption partial vẫn được cập nhật độc lập; video không bị pause để chờ dịch/TTS.
+
+### File đã sửa
+- `src/extension/offscreen.ts`
+- `src/extension/background.ts`
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã chứa stable-partial STT/TTS mới.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Mục tiêu thực tế là khoảng 0,5–1 giây khi Sherpa, Translator local và Chrome TTS đều phản hồi nhanh. Không thể bảo đảm 0,2 giây vì cần đủ âm thanh để xác nhận prefix và còn thời gian dịch/TTS.
+- Brave không có Translator API local sẽ dùng dịch fallback qua mạng; khi mạng chậm, TTS vẫn có thể trễ hơn một giây.
+
+## Fix GitHub GH001 cho model Sherpa — 2026-08-09
+
+### Đã thay đổi gì
+- Nguyên nhân gốc: `sherpa-onnx-wasm-main-asr.data` có kích thước 199.059.238 byte, vượt giới hạn 100 MB/file của GitHub.
+- Chia model thành ba phần lần lượt 67.108.864, 67.108.864 và 64.841.510 byte; không dùng Git LFS và không phát sinh phí/quota LFS.
+- Bootstrap tải tuần tự các phần, ghép vào một `ArrayBuffer`, xác minh đủ đúng 199.059.238 byte rồi cung cấp cho Emscripten qua `getPreloadedPackage`.
+- Nếu tải/ghép model lỗi, phát sự kiện để pipeline tự fallback sang Whisper.
+- SHA-256 dữ liệu ghép đã khớp file gốc: `90B04A9403E4BAE9B23A0A3C00DBAC8603E183361105A52CC03F053217490863`.
+
+### File đã sửa
+- `offscreen.html`
+- `public/sherpa/bootstrap.js`
+- Xóa `public/sherpa/sherpa-onnx-wasm-main-asr.data`.
+- Thêm `public/sherpa/sherpa-onnx-wasm-main-asr.data.part-00` đến `part-02`.
+- `src/extension/offscreen.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist/sherpa` chỉ chứa các model part dưới 100 MB.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Tổng dung lượng model không đổi (~199 MB); thay đổi này giải quyết giới hạn GitHub, không giảm dung lượng cài extension.

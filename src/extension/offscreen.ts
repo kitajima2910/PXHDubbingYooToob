@@ -10,10 +10,22 @@ let modelWorker: Worker | undefined;
 let modelReady = false;
 let modelError = "";
 let modelProgress = 0;
+let recognitionBackend: "sherpa" | "whisper" | "loading" = "loading";
+let sherpaRecognizer: any;
+let sherpaStream: any;
+let sherpaLastPartial = "";
+let sherpaCommittedSource = "";
+let sherpaUtteranceStartedAt = 0;
 let transcriptionId = 0;
 let backpressureActive = false;
 const modelSubscribers = new Set<number>();
 const pendingTranscriptions = new Map<number, { tabId: number; durationMs: number; capturedAt: number }>();
+
+declare global {
+  var Module: Record<string, unknown>;
+  var createOnlineRecognizer: ((module: Record<string, unknown>) => any) | undefined;
+  var __pxhSherpaRuntimeReady: boolean | undefined;
+}
 
 const FRAME_MS = 100;
 const START_RMS = 0.012;
@@ -78,16 +90,71 @@ function updateBackpressure(tabId: number): void {
   void chrome.runtime.sendMessage({ action: "capture-local-backpressure", tabId, active });
 }
 
+function initWhisperModel(): void {
+  recognitionBackend = "whisper";
+  worker().postMessage({ type: "init" });
+}
+
+function initializeSherpa(): void {
+  if (sherpaRecognizer || !globalThis.__pxhSherpaRuntimeReady) return;
+  try {
+    if (typeof globalThis.createOnlineRecognizer !== "function") throw new Error("Sherpa API chưa sẵn sàng");
+    sherpaRecognizer = globalThis.createOnlineRecognizer(globalThis.Module);
+    recognitionBackend = "sherpa";
+    modelReady = true; modelError = ""; modelProgress = 100;
+    publishModelEvent({ type: "ready", progress: 100, backend: "sherpa-streaming" });
+  } catch (error) {
+    modelError = error instanceof Error ? error.message : "Không khởi tạo được sherpa-onnx";
+    initWhisperModel();
+  }
+}
+
+globalThis.addEventListener("pxh-sherpa-ready", initializeSherpa);
+globalThis.addEventListener("pxh-sherpa-error", (event) => {
+  modelError = String((event as CustomEvent<unknown>).detail ?? "Sherpa streaming không khả dụng");
+  if (!modelReady && recognitionBackend === "loading") initWhisperModel();
+});
+globalThis.addEventListener("pxh-sherpa-status", (event) => {
+  const detail = (event as CustomEvent<{ progress?: number }>).detail;
+  if (typeof detail?.progress === "number") modelProgress = detail.progress;
+  publishModelEvent({ type: "progress", progress: modelProgress, backend: "sherpa-streaming" });
+});
+
 function initModel(tabId?: number): void {
   if (tabId !== undefined) modelSubscribers.add(tabId);
   if (modelReady) { publishModelEvent({ type: "ready", progress: 100 }); return; }
   modelError = "";
   publishModelEvent({ type: "progress", progress: modelProgress });
-  worker().postMessage({ type: "init" });
+  initializeSherpa();
+  if (!globalThis.__pxhSherpaRuntimeReady) {
+    globalThis.setTimeout(() => { if (!modelReady && recognitionBackend === "loading") initWhisperModel(); }, 20_000);
+  }
 }
 
 function resetVad(): void {
   preRoll = []; speechFrames = []; speaking = false; silenceMs = 0;
+  if (sherpaStream) { sherpaStream.free(); sherpaStream = undefined; }
+  sherpaLastPartial = ""; sherpaCommittedSource = ""; sherpaUtteranceStartedAt = 0;
+}
+
+function stablePrefix(previous: string, current: string): string {
+  let length = 0;
+  while (length < previous.length && length < current.length && previous[length] === current[length]) length += 1;
+  let prefix = current.slice(0, length).trimEnd();
+  if (!/[\u3400-\u9fff]/u.test(prefix)) prefix = prefix.slice(0, Math.max(0, prefix.lastIndexOf(" "))).trimEnd();
+  return prefix;
+}
+
+function publishStableSpeech(previous: string, current: string): void {
+  if (targetTabId === undefined || !previous || !current) return;
+  const stable = stablePrefix(previous, current);
+  if (!stable.startsWith(sherpaCommittedSource)) return;
+  const delta = stable.slice(sherpaCommittedSource.length).trim();
+  const enough = /[.!?。！？,，;；:]$/u.test(delta)
+    || (/[\u3400-\u9fff]/u.test(delta) ? delta.length >= 6 : delta.split(/\s+/u).length >= 3);
+  if (!enough) return;
+  sherpaCommittedSource = stable;
+  void chrome.runtime.sendMessage({ action: "capture-local-stable", tabId: targetTabId, text: delta });
 }
 
 function joinFrames(frames: Float32Array[]): Float32Array {
@@ -109,6 +176,30 @@ function flushSpeech(): void {
 }
 
 function acceptPcm(samples: Float32Array): void {
+  if (recognitionBackend === "sherpa" && sherpaRecognizer && targetTabId !== undefined) {
+    if (!sherpaStream) {
+      sherpaStream = sherpaRecognizer.createStream();
+      sherpaUtteranceStartedAt = Date.now();
+    }
+    sherpaStream.acceptWaveform(16_000, samples);
+    while (sherpaRecognizer.isReady(sherpaStream)) sherpaRecognizer.decode(sherpaStream);
+    const text = String(sherpaRecognizer.getResult(sherpaStream)?.text ?? "").trim();
+    if (text && text !== sherpaLastPartial) {
+      publishStableSpeech(sherpaLastPartial, text);
+      sherpaLastPartial = text;
+      void chrome.runtime.sendMessage({ action: "capture-local-partial", tabId: targetTabId, text });
+    }
+    if (sherpaRecognizer.isEndpoint(sherpaStream)) {
+      const durationMs = Math.max(400, Date.now() - sherpaUtteranceStartedAt);
+      const remainingText = text.startsWith(sherpaCommittedSource) ? text.slice(sherpaCommittedSource.length).trim() : text;
+      if (remainingText) void chrome.runtime.sendMessage({
+        action: "capture-local-final", tabId: targetTabId, durationMs, capturedAt: Date.now(), text: remainingText,
+      });
+      sherpaRecognizer.reset(sherpaStream);
+      sherpaLastPartial = ""; sherpaCommittedSource = ""; sherpaUtteranceStartedAt = Date.now();
+    }
+    return;
+  }
   const rms = pcmRms(samples);
   if (!speaking) {
     preRoll.push(samples);

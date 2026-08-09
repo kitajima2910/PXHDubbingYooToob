@@ -11,14 +11,14 @@ if (!app) throw new Error("Không tìm thấy vùng giao diện");
 app.innerHTML = `
   <header><img class="brand-mark" src="/PXH.jpg" alt="PXH logo"><div><h1>PXH Dubbing YooToob</h1><p>Realtime Vietnamese AI dubbing</p></div></header>
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
-  <section class="model-card"><div><span>WHISPER LOCAL</span><strong id="modelStatus">Đang kiểm tra model…</strong></div><div class="model-progress"><i id="modelProgress"></i></div><button id="modelRetry" type="button" hidden>Thử tải lại</button></section>
+  <section class="model-card"><div><span>NHẬN DẠNG LOCAL</span><strong id="modelStatus">Đang kiểm tra model…</strong></div><div class="model-progress"><i id="modelProgress"></i></div><button id="modelRetry" type="button" hidden>Thử tải lại</button></section>
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong id="voiceLabel">Nam Minh (nam)</strong></div>
     <div class="source-info"><span>Chế độ</span><strong id="source" style="overflow:visible;white-space:normal;line-height:1.25">—</strong></div>
     <div><span>Đã xử lý</span><strong id="count">0 đoạn</strong></div>
   </section>
-  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Whisper local</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
+  <section class="config-card"><div><span>Nhận dạng</span><strong>DOM → Sherpa → Whisper</strong></div><div><span>Âm thanh gốc</span><strong>8%</strong></div></section>
   <section class="voice-card"><div><span>Giọng đọc</span><select id="voiceSelect" aria-label="Chọn giọng đọc"></select></div></section>
   <section class="api-card">
     <div class="api-heading"><div><span>GROQ API KEY</span><strong id="keyState">Đang kiểm tra…</strong></div><small>Lưu cục bộ trên Chrome</small></div>
