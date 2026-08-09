@@ -519,6 +519,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
       .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không khởi tạo được Whisper local" }));
     return true;
   }
+  if (request?.action === "local-model-status") {
+    void ensureOffscreenDocument()
+      .then(() => chrome.runtime.sendMessage({ action: "capture-offscreen-model-status" }))
+      .then(respond, (error: unknown) => respond({ ok: false, message: error instanceof Error ? error.message : "Không đọc được trạng thái Whisper local" }));
+    return true;
+  }
   if (request?.action === "local-model-event" && request.tabId !== undefined) {
     void chrome.tabs.sendMessage(request.tabId, {
       action: "local-model-event", type: request.type, progress: request.progress, message: request.message,

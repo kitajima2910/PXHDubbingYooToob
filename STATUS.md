@@ -107,3 +107,48 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 - Không có Chrome/Edge kết nối trong môi trường browser test, nên chưa verify được model download, CSP/WebGPU/WASM và tabCapture end-to-end trên extension đã nạp.
 - `npm audit` báo advisory ở dependency Node-only của Transformers.js (`sharp`, `onnxruntime-node`) và các advisory build-time Vercel cũ. Các module Node-only không có trong bundle extension; upstream chưa có fix cho nhánh Transformers.js này.
 - Dubbing local là near-realtime, không thể tức thời tuyệt đối; chất lượng và việc backpressure có kích hoạt hay không phụ thuộc CPU/GPU của máy.
+
+## Fix quyền tabCapture từ overlay — 2026-08-09
+
+### Đã thay đổi
+- Sửa nguyên nhân `Error starting tab capture`: nút trên overlay không còn yêu cầu thu âm trực tiếp từ content script.
+- Nút overlay giờ mở popup PXH; thao tác thu âm chỉ bắt đầu từ nút `Bắt đầu lồng tiếng` trong popup, đúng ngữ cảnh extension invocation mà Chrome yêu cầu.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `src/extension/background.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension đã build và xác nhận tabCapture trực tiếp trên Chrome.
+
+## Chuyển tải model vào popup — 2026-08-09
+
+### Đã thay đổi
+- Gỡ hoàn toàn overlay Whisper khỏi trang YouTube.
+- Popup hiển thị phần trăm tải model, thanh tiến trình, trạng thái đã lưu trên máy và lỗi tải.
+- Khóa nút bắt đầu trong lúc model đang tải; nếu lỗi, popup cung cấp nút `Thử tải lại`.
+- Popup đọc trạng thái trực tiếp từ offscreen process nên đóng/mở lại vẫn thấy đúng tiến trình hiện tại.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `src/extension/background.ts`
+- `src/extension/offscreen.ts`
+- `src/extension/popup.ts`
+- `src/extension/popup-model.css`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension và xác nhận trực tiếp phần trăm tải model trong popup Chrome.

@@ -80,11 +80,9 @@ function updateBackpressure(tabId: number): void {
 function initModel(tabId?: number): void {
   if (tabId !== undefined) modelSubscribers.add(tabId);
   if (modelReady) { publishModelEvent({ type: "ready", progress: 100 }); return; }
-  if (modelError) publishModelEvent({ type: "error", message: modelError });
-  else {
-    publishModelEvent({ type: "progress", progress: modelProgress });
-    worker().postMessage({ type: "init" });
-  }
+  modelError = "";
+  publishModelEvent({ type: "progress", progress: modelProgress });
+  worker().postMessage({ type: "init" });
 }
 
 function resetVad(): void {

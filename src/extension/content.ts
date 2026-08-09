@@ -39,10 +39,6 @@ let trainingKeepAlivePort: chrome.runtime.Port | undefined;
 let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
-let localModelState: "loading" | "ready" | "error" = "loading";
-let localModelProgress = 0;
-let localModelMessage = "Đang chuẩn bị Whisper local";
-let modelOverlay: HTMLDivElement | undefined;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
@@ -54,45 +50,6 @@ function cacheContext(): { videoId: string; sourceLanguage: string } { return { 
 function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
   if (whisperMode) return translateWithBrowser(segments);
   return translateSegments(segments, signal, cacheContext());
-}
-
-function renderModelOverlay(): void {
-  if (!modelOverlay) return;
-  if (state.enabled) { modelOverlay.hidden = true; return; }
-  modelOverlay.hidden = false;
-  const title = modelOverlay.querySelector<HTMLElement>("[data-model-title]");
-  const detail = modelOverlay.querySelector<HTMLElement>("[data-model-detail]");
-  const button = modelOverlay.querySelector<HTMLButtonElement>("button");
-  if (title) title.textContent = localModelState === "ready" ? "PXH Dubbing đã sẵn sàng" : localModelState === "error" ? "Whisper local chưa sẵn sàng" : `Đang tải dữ liệu nhận dạng: ${localModelProgress}%`;
-  if (detail) detail.textContent = localModelState === "loading" ? "Model chỉ tải một lần và được lưu trên máy" : localModelMessage;
-  if (button) { button.disabled = localModelState === "loading"; button.textContent = localModelState === "error" ? "Thử tải lại" : "Bắt đầu lồng tiếng"; }
-}
-
-function ensureModelOverlay(): void {
-  if (modelOverlay?.isConnected) return;
-  const overlay = document.createElement("div");
-  overlay.id = "pxh-local-model-overlay";
-  overlay.style.cssText = "position:fixed;left:50%;top:82px;transform:translateX(-50%);z-index:2147483647;width:min(420px,calc(100vw - 32px));padding:16px 18px;border-radius:14px;background:rgba(12,18,30,.94);color:#fff;font:14px/1.45 system-ui;box-shadow:0 12px 38px rgba(0,0,0,.4);text-align:center";
-  overlay.innerHTML = `<strong data-model-title style="display:block;font-size:16px;margin-bottom:5px"></strong><span data-model-detail style="display:block;color:#cbd5e1;margin-bottom:12px"></span><button type="button" style="border:0;border-radius:9px;padding:9px 16px;background:#ef4444;color:white;font-weight:700;cursor:pointer"></button>`;
-  overlay.querySelector("button")?.addEventListener("click", () => {
-    if (localModelState === "error") {
-      localModelState = "loading"; localModelMessage = "Đang thử tải lại"; renderModelOverlay();
-      void chrome.runtime.sendMessage({ action: "local-model-init" }); return;
-    }
-    if (localModelState !== "ready") return;
-    const video = document.querySelector<HTMLVideoElement>("video");
-    if (!video) { localModelMessage = "Không tìm thấy video YouTube"; renderModelOverlay(); return; }
-    void chrome.runtime.sendMessage({ action: "capture-start", sourceVolume: DEFAULT_SOURCE_VOLUME }).then(
-      (capture: { ok?: boolean; message?: string }) => {
-        if (!capture?.ok) throw new Error(capture?.message ?? "Không thể thu âm tab");
-        return start(DEFAULT_DELAY_SECONDS, DEFAULT_SOURCE_VOLUME);
-      },
-    ).then(() => renderModelOverlay(), (error: unknown) => {
-      localModelMessage = error instanceof Error ? error.message : "Không thể bắt đầu lồng tiếng";
-      renderModelOverlay();
-    });
-  });
-  document.documentElement.append(overlay); modelOverlay = overlay; renderModelOverlay();
 }
 
 function speechFingerprint(text: string): string {
@@ -493,7 +450,6 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
-  renderModelOverlay();
   return state;
 }
 
@@ -501,10 +457,7 @@ function fail(message: string): ExtensionState { update({ enabled: false, status
 
 chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; capturedAt?: number; startMs?: number; type?: string; progress?: number; message?: string; segments?: SubtitleSegment[]; active?: boolean }, _sender, respond) => {
   if (request.action === "local-model-event") {
-    if (request.type === "ready") { localModelState = "ready"; localModelProgress = 100; localModelMessage = "Model đã được lưu trên máy"; }
-    else if (request.type === "error") { localModelState = "error"; localModelMessage = request.message ?? "Không tải được Whisper local"; }
-    else { localModelState = "loading"; localModelProgress = Math.max(0, Math.min(100, request.progress ?? 0)); }
-    ensureModelOverlay(); renderModelOverlay(); respond({ ok: true }); return;
+    respond({ ok: true }); return;
   }
   if (request.action === "training-ready") { respond({ ok: true, videoId: videoId() }); return; }
   if (request.action === "prepare-offline-translation") {
@@ -604,5 +557,4 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
 
 setInterval(() => { if (state.enabled && currentVideoId && videoId() !== currentVideoId) void stop(); }, 1000);
 
-ensureModelOverlay();
 void chrome.runtime.sendMessage({ action: "local-model-init" });

@@ -3,6 +3,7 @@ import type { SubtitleSegment } from "../shared/types";
 import { DEFAULT_VOICE_ID, EDGE_VOICES, VOICE_STORAGE_KEY, isKnownVoice, voiceOption } from "../shared/voices";
 import { parseVideoIdFromUrl, selectChangedSegments } from "./subtitle-editor";
 import "./popup.css";
+import "./popup-model.css";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Không tìm thấy vùng giao diện");
@@ -10,6 +11,7 @@ if (!app) throw new Error("Không tìm thấy vùng giao diện");
 app.innerHTML = `
   <header><img class="brand-mark" src="/PXH.jpg" alt="PXH logo"><div><h1>PXH Dubbing YooToob</h1><p>Realtime Vietnamese AI dubbing</p></div></header>
   <section class="status-card"><span id="statusDot" class="status-dot"></span><div><small>TRẠNG THÁI</small><strong id="status">Đang kiểm tra…</strong></div></section>
+  <section class="model-card"><div><span>WHISPER LOCAL</span><strong id="modelStatus">Đang kiểm tra model…</strong></div><div class="model-progress"><i id="modelProgress"></i></div><button id="modelRetry" type="button" hidden>Thử tải lại</button></section>
   <button id="dubbingToggle" class="dubbing-toggle" type="button" disabled>Bắt đầu lồng tiếng</button>
   <section class="info-grid">
     <div><span>Giọng đọc</span><strong id="voiceLabel">Nam Minh (nam)</strong></div>
@@ -40,6 +42,8 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 let tab: chrome.tabs.Tab | undefined;
 let currentState: ExtensionState | undefined;
 let toggling = false;
+let modelState: "loading" | "ready" | "error" = "loading";
+let modelProgress = 0;
 
 async function ensureDubbingContent(tabId: number): Promise<ExtensionState> {
   try {
@@ -64,10 +68,38 @@ function render(state?: ExtensionState): void {
   query("#count").textContent = `${value.processedSegments} đoạn`;
   query("#statusDot").className = `status-dot ${value.status}`;
   const toggle = query<HTMLButtonElement>("#dubbingToggle");
-  toggle.disabled = toggling || !tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch");
+  toggle.disabled = toggling || modelState !== "ready" || !tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch");
   toggle.dataset.active = String(value.enabled);
-  toggle.textContent = toggling ? "Đang chuẩn bị…" : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
+  toggle.textContent = toggling ? "Đang chuẩn bị…" : modelState === "loading" ? `Đang tải model ${modelProgress}%` : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
 }
+
+function renderModel(message = ""): void {
+  query("#modelStatus").textContent = modelState === "ready" ? "Sẵn sàng — đã lưu trên máy" : modelState === "error" ? (message || "Không tải được model") : `Đang tải dữ liệu nhận dạng: ${modelProgress}%`;
+  query<HTMLElement>("#modelProgress").style.width = `${modelProgress}%`;
+  query<HTMLElement>("#modelProgress").parentElement?.classList.toggle("error", modelState === "error");
+  query<HTMLButtonElement>("#modelRetry").hidden = modelState !== "error";
+  render(currentState);
+}
+
+async function refreshModelStatus(): Promise<void> {
+  const result = await chrome.runtime.sendMessage({ action: "local-model-status" }) as { ok?: boolean; ready?: boolean; progress?: number; message?: string };
+  modelProgress = Math.max(0, Math.min(100, result.progress ?? 0));
+  modelState = result.ready ? "ready" : result.ok === false || result.message ? "error" : "loading";
+  renderModel(result.message);
+}
+
+query<HTMLButtonElement>("#modelRetry").addEventListener("click", () => {
+  modelState = "loading"; modelProgress = 0; renderModel();
+  void chrome.runtime.sendMessage({ action: "local-model-init", tabId: tab?.id }).then(() => refreshModelStatus());
+});
+
+const modelPoll = window.setInterval(() => {
+  if (modelState === "loading") void refreshModelStatus().catch(() => undefined);
+  else if (modelState === "ready") window.clearInterval(modelPoll);
+}, 500);
+void refreshModelStatus().catch((error: unknown) => {
+  modelState = "error"; renderModel(error instanceof Error ? error.message : "Không đọc được trạng thái model");
+});
 
 const keyInput = query<HTMLInputElement>("#groqKey");
 const defaultKeyButton = query<HTMLButtonElement>("#useDefault");
