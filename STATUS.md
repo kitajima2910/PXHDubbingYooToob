@@ -213,3 +213,24 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Trên Brave, dịch fallback cần kết nối mạng; Translator API offline chỉ khả dụng trên trình duyệt triển khai API này.
+
+## Fix Whisper đọc nguyên văn ngoại ngữ — 2026-08-09
+
+### Đã thay đổi
+- Loại bản dịch cache trùng nguyên văn nguồn đối với câu Whisper không phải tiếng Việt và buộc dịch lại.
+- Xem kết quả Groq trùng nguồn là không hợp lệ để pipeline chuyển sang provider fallback.
+- Nhánh Whisper không còn đưa `sourceText` ngoại ngữ trực tiếp vào TTS khi thiếu bản dịch.
+
+### File đã sửa
+- `src/extension/api/client.ts`
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Whisper tiny tự nhận diện ngôn ngữ từ từng đoạn audio ngắn; video đa ngôn ngữ hoặc âm thanh khó vẫn có thể nhận dạng sai câu nguồn.

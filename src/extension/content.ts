@@ -142,6 +142,7 @@ async function startTrainingRecorder(video: HTMLVideoElement): Promise<void> {
 }
 
 async function addPreparedSpeech(segment: SubtitleSegment, signal: AbortSignal): Promise<void> {
+  if (whisperMode && !segment.translatedText?.trim()) throw new Error("Whisper chưa có bản dịch tiếng Việt");
   const text = segment.translatedText ?? segment.sourceText;
   // Whisper đang thu chính tab: ưu tiên Chrome TTS nam để giọng dubbing không
   // lọt ngược vào audio nhận dạng. Luồng transcript dùng MP3 Nam Minh ổn định,
