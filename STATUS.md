@@ -94,3 +94,23 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần reload extension từ `dist` để trình duyệt dùng bundle mới; tab đã mở cũng cần refresh.
+
+## Giảm lượng dịch trước của transcript DOM — 2026-08-09
+
+### Đã thay đổi gì
+- Giảm cửa sổ chuẩn bị transcript từ 60 giây xuống 45 giây.
+- Giảm số caption tối đa mỗi lượt từ 15 xuống 12 để không dịch/TTS quá xa thời điểm video hiện tại.
+- Không thay đổi scheduler, timestamp hoặc cơ chế phát đang ổn định.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 53/53 test pass, 10/10 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần nghe thử thực tế sau khi reload extension để cân chỉnh thêm nếu 45 giây vẫn nhiều hoặc buffer quá ngắn trên mạng chậm.

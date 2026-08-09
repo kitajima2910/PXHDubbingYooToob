@@ -36,6 +36,8 @@ let trainingKeepAlivePort: chrome.runtime.Port | undefined;
 let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
+const TRANSCRIPT_BUFFER_WINDOW_MS = 45_000;
+const TRANSCRIPT_BUFFER_SEGMENT_LIMIT = 12;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
@@ -167,7 +169,13 @@ function webSpeechSpeak(text: string, rate: number): Promise<void> {
 
 async function buildWindow(segments: SubtitleSegment[], video: HTMLVideoElement, signal: AbortSignal, queued: Set<string>): Promise<number> {
   const fromMs = Math.max(0, video.currentTime * 1000);
-  const upcoming = selectUpcomingSegments(segments, fromMs, 60_000, queued);
+  const upcoming = selectUpcomingSegments(
+    segments,
+    fromMs,
+    TRANSCRIPT_BUFFER_WINDOW_MS,
+    queued,
+    TRANSCRIPT_BUFFER_SEGMENT_LIMIT,
+  );
   for (const item of upcoming) queued.add(item.id);
   const candidates = upcoming
     .map((segment) => ({ ...segment, sourceText: stripTranscriptTimestamps(segment.sourceText) }))
