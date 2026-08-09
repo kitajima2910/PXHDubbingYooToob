@@ -93,38 +93,22 @@ function ensureLiveCaption(): HTMLDivElement {
 }
 
 function showVietnameseLiveCaption(segments: SubtitleSegment[]): void {
-  if (!whisperMode) return;
-  const text = segments.map((segment) => segment.translatedText?.trim() ?? "").filter(Boolean).join(" ").slice(-360);
-  if (!text) return;
-  const root = ensureLiveCaption();
-  const output = root.querySelector<HTMLElement>("[data-live-caption-text]");
-  if (output) output.textContent = text;
-  root.hidden = false;
+  // Floating caption is intentionally disabled. Keep the transcript store for
+  // streaming translation/TTS, but do not render it over the video.
+  void segments;
 }
 
 function renderLiveTranscript(): void {
-  if (!whisperMode) return;
-  const root = ensureLiveCaption();
-  const output = root.querySelector<HTMLElement>("[data-live-caption-text]");
-  if (!output) return;
-  const records = liveTranscript.recent(2);
-  output.replaceChildren();
-  for (const record of records) {
-    const line = document.createElement("div");
-    line.dataset.segmentId = record.id;
-    line.dataset.status = record.status;
-    line.dataset.startMs = String(record.startMs);
-    line.dataset.endMs = String(record.endMs);
-    line.textContent = record.translatedText?.trim() || "Đang dịch…";
-    line.style.opacity = record.status === "partial" ? "1" : ".78";
-    output.append(line);
-  }
-  root.hidden = records.length === 0;
+  // Floating caption is intentionally disabled.
 }
 
 function hideLiveCaption(): void {
-  if (liveCaption) liveCaption.hidden = true;
+  liveCaption?.remove();
+  document.querySelector("#pxh-live-caption")?.remove();
+  liveCaption = undefined;
 }
+
+hideLiveCaption();
 
 function queueStreamingPartialTranslation(utteranceId: string, sourceText: string): void {
   const signal = controller?.signal;
@@ -576,16 +560,12 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     (_segment, text) => createSpeech(text, 1, sessionController.signal, currentVoiceId), webSpeechSpeak);
   const ttsStatus = await chrome.runtime.sendMessage({ action: "tts-status" }).catch(() => undefined) as { available?: boolean } | undefined;
   chromeTtsAvailable = ttsStatus?.available === true;
-  update({ enabled: true, status: "loading", message: "Đang kiểm tra subtitle (tối đa 1 giây)", processedSegments: 0 });
+  update({ enabled: true, status: "loading", message: "Đang kiểm tra subtitle YouTube", processedSegments: 0 });
   try {
     if (!isYouTubeWatchPage()) {
       await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
       scheduler.start();
       whisperMode = true;
-      const caption = ensureLiveCaption();
-      const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
-      if (captionText) captionText.textContent = "Đang nghe…";
-      caption.hidden = false;
       update({ enabled: true, status: "ready", message: "Đang nghe video realtime", source: "Sherpa streaming → Whisper fallback" });
       await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
       if (resumeWhenReady) void video.play().catch(() => undefined);
@@ -595,7 +575,7 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
     let useBackend = false;
     let completeTranscript = false;
     try {
-      captions = await loadYouTubeCaptions(1_000);
+      captions = await loadYouTubeCaptions();
       completeTranscript = true;
       void saveCachedTranscript(cacheContext(), captions.source, captions.segments, true).catch(() => undefined);
     }
@@ -605,10 +585,6 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
       const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript";
       console.info(`PXHDubbingYooToob: video không có subtitle, dùng audio streaming (${reason})`);
       whisperMode = true;
-      const caption = ensureLiveCaption();
-      const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
-      if (captionText) captionText.textContent = "Video không có subtitle — đang nhận dạng audio…";
-      caption.hidden = false;
       update({
         enabled: true,
         status: "ready",

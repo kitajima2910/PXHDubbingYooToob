@@ -594,3 +594,26 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - YouTube có thể phản hồi caption chậm hơn 1 giây trên máy/mạng rất chậm; trường hợp đó sẽ được coi là không subtitle và dùng audio streaming trong phiên hiện tại.
+
+## Khôi phục pipeline transcript DOM và bỏ Live Caption nổi — 2026-08-09
+
+### Đã thay đổi gì
+- Xác định nguyên nhân gốc của hiện tượng nói vấp/chồng trên video có phụ đề: giới hạn dò caption 1 giây khiến YouTube bị phân loại nhầm sang audio streaming.
+- Khôi phục thời gian chờ mặc định của bộ đọc phụ đề YouTube (tối đa 12 giây); chỉ fallback sang Sherpa/Whisper khi việc lấy subtitle thực sự thất bại.
+- Video có transcript tiếp tục dùng pipeline DOM ổn định cũ; nhánh audio streaming không còn chạy song song với pipeline DOM.
+- Tắt hoàn toàn floating Live Caption trên trang video. Transcript nội bộ vẫn được giữ cho dịch/TTS ở video không subtitle; trạng thái fallback chỉ hiển thị trong popup.
+- Khi nạp lại content script, phần tử Live Caption cũ cũng được gỡ khỏi DOM.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 59/59 test pass, 12/12 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Chưa thể kiểm tra nghe trực tiếp trong Brave từ terminal. Cần reload extension từ `dist`, mở lại video và xác nhận popup hiển thị nguồn Transcript thay vì `Audio streaming — không có subtitle`.
+- Video thật sự không có subtitle vẫn phụ thuộc nhận dạng audio/dịch/TTS và không thể đồng bộ bằng transcript DOM.
