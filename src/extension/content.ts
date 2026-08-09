@@ -47,8 +47,14 @@ function takePendingWhisperChunk(): WhisperChunk | undefined {
 function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
 function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
 function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
-function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
-  if (whisperMode) return translateWithBrowser(segments);
+async function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
+  if (whisperMode) {
+    try { return await translateWithBrowser(segments); }
+    catch (error) {
+      console.info("PXHDubbingYooToob: Translator API không khả dụng, chuyển sang dịch fallback", error);
+      return translateSegments(segments, signal, cacheContext());
+    }
+  }
   return translateSegments(segments, signal, cacheContext());
 }
 

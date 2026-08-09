@@ -193,3 +193,23 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần reload extension và xác nhận AudioWorklet trực tiếp trên Brave.
+
+## Fix Brave không có Translator API — 2026-08-09
+
+### Đã thay đổi
+- Nhánh Whisper vẫn ưu tiên Chrome Translator API chạy local khi trình duyệt hỗ trợ.
+- Nếu Brave không có Translator API/model ngôn ngữ, tự chuyển sang pipeline dịch fallback hiện có (`cache → Groq/default → Google Translate`) thay vì dừng dubbing.
+- Không thêm model hoặc dependency mới; Chrome có Translator API giữ nguyên hành vi local.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Trên Brave, dịch fallback cần kết nối mạng; Translator API offline chỉ khả dụng trên trình duyệt triển khai API này.
