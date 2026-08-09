@@ -17,9 +17,9 @@ const pendingTranscriptions = new Map<number, { tabId: number; durationMs: numbe
 
 const FRAME_MS = 100;
 const START_RMS = 0.012;
-const END_SILENCE_MS = 600;
-const MIN_SPEECH_MS = 500;
-const MAX_SPEECH_MS = 8_000;
+const END_SILENCE_MS = 350;
+const MIN_SPEECH_MS = 400;
+const MAX_SPEECH_MS = 5_000;
 let preRoll: Float32Array[] = [];
 let speechFrames: Float32Array[] = [];
 let speaking = false;
@@ -112,7 +112,7 @@ function acceptPcm(samples: Float32Array): void {
   const rms = pcmRms(samples);
   if (!speaking) {
     preRoll.push(samples);
-    if (preRoll.length > 3) preRoll.shift();
+    if (preRoll.length > 2) preRoll.shift();
     if (rms >= START_RMS) {
       speaking = true; speechFrames = [...preRoll]; preRoll = []; silenceMs = 0;
     }

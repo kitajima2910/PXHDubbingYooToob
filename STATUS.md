@@ -275,3 +275,26 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Edge TTS cần mạng và có thêm độ trễ tạo audio; đây là fallback cho Brave không cài giọng Việt local.
+
+## Giảm latency Whisper realtime — 2026-08-09
+
+### Đã thay đổi
+- Giảm thời gian chờ kết câu VAD từ 600 ms xuống 350 ms.
+- Giảm chunk tối đa từ 8 giây xuống 5 giây, tối thiểu từ 500 ms xuống 400 ms và pre-roll từ 300 ms xuống 200 ms.
+- Giảm delay Whisper cấu hình từ 5 giây xuống 1 giây.
+- Sau lần đầu xác định Brave không có Translator API, không thử lại API lỗi ở mọi chunk; chuyển thẳng sang dịch fallback.
+
+### File đã sửa
+- `src/extension/offscreen.ts`
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Video không transcript không thể đạt độ trễ bằng pipeline DOM: vẫn phải chờ kết câu, Whisper, dịch và TTS. Máy yếu hoặc Edge TTS mạng chậm sẽ kích hoạt cơ chế tạm dừng để bắt kịp.

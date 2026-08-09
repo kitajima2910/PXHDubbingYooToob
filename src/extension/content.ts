@@ -37,8 +37,9 @@ let trainingRecorder: MediaRecorder | undefined;
 let trainingStream: MediaStream | undefined;
 let trainingKeepAlivePort: chrome.runtime.Port | undefined;
 let trainingKeepAliveTimer = 0;
-const DEFAULT_DELAY_SECONDS = 5;
+const DEFAULT_DELAY_SECONDS = 1;
 const DEFAULT_SOURCE_VOLUME = 0.08;
+let browserTranslatorUnavailable = false;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
@@ -49,11 +50,14 @@ function update(patch: Partial<ExtensionState>): void { state = { ...state, ...p
 function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
 async function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
   if (whisperMode) {
-    try { return await translateWithBrowser(segments); }
-    catch (error) {
-      console.info("PXHDubbingYooToob: Translator API không khả dụng, chuyển sang dịch fallback", error);
-      return translateSegments(segments, signal, cacheContext());
+    if (!browserTranslatorUnavailable) {
+      try { return await translateWithBrowser(segments); }
+      catch (error) {
+        browserTranslatorUnavailable = true;
+        console.info("PXHDubbingYooToob: Translator API không khả dụng, chuyển sang dịch fallback", error);
+      }
     }
+    return translateSegments(segments, signal, cacheContext());
   }
   return translateSegments(segments, signal, cacheContext());
 }
