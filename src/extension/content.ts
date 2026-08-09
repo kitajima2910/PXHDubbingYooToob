@@ -36,8 +36,8 @@ let trainingKeepAlivePort: chrome.runtime.Port | undefined;
 let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 5;
 const DEFAULT_SOURCE_VOLUME = 0.08;
-const TRANSCRIPT_BUFFER_WINDOW_MS = 45_000;
-const TRANSCRIPT_BUFFER_SEGMENT_LIMIT = 12;
+const TRANSCRIPT_BUFFER_WINDOW_MS = 50_000;
+const TRANSCRIPT_BUFFER_SEGMENT_LIMIT = 15;
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();

@@ -114,3 +114,23 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần nghe thử thực tế sau khi reload extension để cân chỉnh thêm nếu 45 giây vẫn nhiều hoặc buffer quá ngắn trên mạng chậm.
+
+## Cân lại buffer sau khi dubbing bị trễ — 2026-08-09
+
+### Đã thay đổi gì
+- Tăng cửa sổ chuẩn bị từ 45 lên 50 giây.
+- Khôi phục giới hạn 15 caption mỗi lượt; hội thoại dày không còn cạn buffer do giới hạn 12 câu.
+- Vẫn thấp hơn cửa sổ 60 giây ban đầu nên không dịch quá xa như trước.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 53/53 test pass, 10/10 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần nghe thử thực tế sau khi reload extension để xác nhận điểm cân bằng mới.
