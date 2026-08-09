@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "minimum_chrome_version": "138",
   "name": "PXH Dubbing YooToob",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Lồng tiếng Việt thông minh cho video YouTube với độ trễ thấp.",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"

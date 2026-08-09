@@ -173,3 +173,23 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần reload extension và xác nhận capture thực tế trên Brave.
+
+## Fix AudioWorklet module — 2026-08-09
+
+### Đã thay đổi
+- Xác định Vite đã inline `pcm-worklet.ts` thành URL `data:video/mp2t`, bị AudioWorklet của extension từ chối.
+- Chuyển worklet sang entry `?worker&url` để build thành file JavaScript độc lập có URL extension hợp lệ.
+
+### File đã sửa
+- `src/extension/offscreen.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass.
+- Xác nhận `dist/assets/pcm-worklet-NBJZvJNM.js` được phát hành riêng và offscreen gọi URL `/assets/pcm-worklet-NBJZvJNM.js`; không còn data URL sai MIME.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension và xác nhận AudioWorklet trực tiếp trên Brave.

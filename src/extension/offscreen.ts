@@ -1,4 +1,5 @@
 import { pcmRms, shouldFlushSpeech } from "./local-stt/vad";
+import pcmWorkletUrl from "./local-stt/pcm-worklet.ts?worker&url";
 
 let stream: MediaStream | undefined;
 let targetTabId: number | undefined;
@@ -140,7 +141,7 @@ async function startCapture(streamId: string, tabId: number, sourceVolume: numbe
   } as MediaStreamConstraints);
   targetTabId = tabId;
   audioContext = new AudioContext();
-  await audioContext.audioWorklet.addModule(new URL("./local-stt/pcm-worklet.ts", import.meta.url));
+  await audioContext.audioWorklet.addModule(pcmWorkletUrl);
   const source = audioContext.createMediaStreamSource(stream);
   gainNode = audioContext.createGain(); gainNode.gain.value = Math.max(0, Math.min(1, sourceVolume));
   workletNode = new AudioWorkletNode(audioContext, "pxh-pcm-processor", { numberOfInputs: 1, numberOfOutputs: 0 });
