@@ -4,6 +4,7 @@ import { batchSegments, mergeOverlappingSegments, selectUpcomingSegments, stripT
 // Inline — KHÔNG import từ ../shared/voices để giữ content script standalone.
 const DEFAULT_VOICE_ID = "vi-VN-NamMinhNeural";
 const VOICE_STORAGE_KEY = "dubbingVoiceId";
+const LIVE_CAPTION_COLLAPSED_KEY = "liveCaptionCollapsed";
 function isKnownVoice(id: string): boolean {
   return id === "vi-VN-NamMinhNeural" || id === "vi-VN-HoaiMyNeural";
 }
@@ -40,12 +41,76 @@ let trainingKeepAliveTimer = 0;
 const DEFAULT_DELAY_SECONDS = 1;
 const DEFAULT_SOURCE_VOLUME = 0.08;
 let browserTranslatorUnavailable = false;
+let liveCaption: HTMLDivElement | undefined;
+let liveCaptionCollapsed = false;
+
+function renderLiveCaption(): void {
+  if (!liveCaption) return;
+  const text = liveCaption.querySelector<HTMLElement>("[data-live-caption-text]");
+  const toggle = liveCaption.querySelector<HTMLButtonElement>("button");
+  if (text) text.hidden = liveCaptionCollapsed;
+  if (toggle) {
+    toggle.textContent = liveCaptionCollapsed ? "CC" : "−";
+    toggle.title = liveCaptionCollapsed ? "Hiện Live Caption" : "Ẩn Live Caption";
+    toggle.setAttribute("aria-expanded", String(!liveCaptionCollapsed));
+  }
+  liveCaption.style.padding = liveCaptionCollapsed ? "0" : "8px 10px";
+  liveCaption.style.background = liveCaptionCollapsed ? "transparent" : "rgba(10,14,22,.88)";
+}
+
+function ensureLiveCaption(): HTMLDivElement {
+  if (liveCaption?.isConnected) return liveCaption;
+  const existing = document.querySelector<HTMLDivElement>("#pxh-live-caption");
+  if (existing) { liveCaption = existing; return existing; }
+  const root = document.createElement("div");
+  root.id = "pxh-live-caption";
+  root.hidden = true;
+  root.style.cssText = "position:fixed;top:78px;right:16px;z-index:2147483646;width:min(320px,calc(100vw - 32px));border:1px solid rgba(255,255,255,.16);border-radius:9px;color:#fff;font:500 13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 6px 22px rgba(0,0,0,.28);pointer-events:none;transition:opacity .15s";
+  root.innerHTML = `<button type="button" aria-label="Ẩn hoặc hiện Live Caption" style="position:absolute;top:4px;right:4px;min-width:25px;height:25px;padding:0 6px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:rgba(12,18,28,.92);color:#fff;font:700 11px system-ui;cursor:pointer;pointer-events:auto"></button><div data-live-caption-text style="padding-right:24px;white-space:normal;overflow-wrap:anywhere"></div>`;
+  root.querySelector("button")?.addEventListener("click", () => {
+    liveCaptionCollapsed = !liveCaptionCollapsed;
+    renderLiveCaption();
+    void chrome.storage.local.set({ [LIVE_CAPTION_COLLAPSED_KEY]: liveCaptionCollapsed });
+  });
+  document.documentElement.append(root);
+  liveCaption = root;
+  void chrome.storage.local.get(LIVE_CAPTION_COLLAPSED_KEY).then((stored) => {
+    liveCaptionCollapsed = stored[LIVE_CAPTION_COLLAPSED_KEY] === true;
+    renderLiveCaption();
+  });
+  renderLiveCaption();
+  return root;
+}
+
+function showVietnameseLiveCaption(segments: SubtitleSegment[]): void {
+  if (!whisperMode) return;
+  const text = segments.map((segment) => segment.translatedText?.trim() ?? "").filter(Boolean).join(" ").slice(-360);
+  if (!text) return;
+  const root = ensureLiveCaption();
+  const output = root.querySelector<HTMLElement>("[data-live-caption-text]");
+  if (output) output.textContent = text;
+  root.hidden = false;
+}
+
+function hideLiveCaption(): void {
+  if (liveCaption) liveCaption.hidden = true;
+}
 
 function takePendingWhisperChunk(): WhisperChunk | undefined {
   return whisperQueue.shift();
 }
 
-function videoId(): string { return new URL(location.href).searchParams.get("v") ?? ""; }
+function videoId(): string {
+  const url = new URL(location.href);
+  const youtubeId = /(^|\.)youtube\.com$/i.test(url.hostname) ? url.searchParams.get("v") : null;
+  if (youtubeId) return youtubeId;
+  const mediaSource = document.querySelector<HTMLVideoElement>("video")?.currentSrc ?? "";
+  const input = `${url.origin}${url.pathname}${url.search}|${mediaSource}`;
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index++) hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+  return `web-${(hash >>> 0).toString(36)}`;
+}
+function isYouTubeWatchPage(): boolean { return /(^|\.)youtube\.com$/i.test(location.hostname) && new URL(location.href).pathname === "/watch"; }
 function update(patch: Partial<ExtensionState>): void { state = { ...state, ...patch }; }
 function cacheContext(): { videoId: string; sourceLanguage: string } { return { videoId: currentVideoId, sourceLanguage: "auto" }; }
 async function translateForVideo(segments: SubtitleSegment[], signal: AbortSignal): Promise<SubtitleSegment[]> {
@@ -306,6 +371,7 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     startMs: segment.startMs + scheduleShiftMs,
     endMs: segment.endMs + scheduleShiftMs,
   })) : translated;
+  showVietnameseLiveCaption(scheduledTranslations);
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   const prepare = async (segment: SubtitleSegment): Promise<void> => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
@@ -412,6 +478,19 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   chromeTtsAvailable = ttsStatus?.available === true;
   update({ enabled: true, status: "loading", message: "Đang tải phụ đề", processedSegments: 0 });
   try {
+    if (!isYouTubeWatchPage()) {
+      await chrome.runtime.sendMessage({ action: "capture-volume", sourceVolume: 1 }).catch(() => undefined);
+      scheduler.start();
+      whisperMode = true;
+      const caption = ensureLiveCaption();
+      const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
+      if (captionText) captionText.textContent = "Đang nghe…";
+      caption.hidden = false;
+      update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — video web" });
+      await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
+      if (resumeWhenReady) void video.play().catch(() => undefined);
+      return state;
+    }
     let captions: { segments: SubtitleSegment[]; source: string };
     let useBackend = false;
     let completeTranscript = false;
@@ -436,6 +515,10 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
           scheduler.start();
           const reason = bridgeError instanceof Error ? bridgeError.message : "không có transcript"; console.info(`PXHDubbingYooToob: chuyen sang Whisper (${reason})`);
           whisperMode = true;
+          const caption = ensureLiveCaption();
+          const captionText = caption.querySelector<HTMLElement>("[data-live-caption-text]");
+          if (captionText) captionText.textContent = "Đang nghe…";
+          caption.hidden = false;
           update({ enabled: true, status: "ready", message: "Đang nghe video bằng Whisper", source: "Whisper — realtime có độ trễ ngắn" });
           await chrome.runtime.sendMessage({ action: "capture-reset" }).catch(() => undefined);
           if (resumeWhenReady) void video.play().catch(() => undefined);
@@ -477,6 +560,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
   scheduledEndMs = 0;
   if (stopCapture) void chrome.runtime.sendMessage({ action: "capture-stop" });
   scheduler?.clear(); scheduler = undefined;
+  hideLiveCaption();
   update({ enabled: false, status: "idle", message: "Sẵn sàng" });
   return state;
 }

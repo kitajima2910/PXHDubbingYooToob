@@ -45,30 +45,37 @@ let toggling = false;
 let modelState: "loading" | "ready" | "error" = "loading";
 let modelProgress = 0;
 
+function isSupportedVideoPage(url?: string): boolean {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
 async function ensureDubbingContent(tabId: number): Promise<ExtensionState> {
   try {
     return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
   } catch {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
+    const target = await chrome.tabs.get(tabId);
+    if (target.url?.startsWith("https://www.youtube.com/watch")) {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" });
+    }
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"], world: "ISOLATED" });
     try {
       return await chrome.tabs.sendMessage(tabId, { action: "status" }) as ExtensionState;
     } catch (error) {
       const detail = error instanceof Error ? `: ${error.message}` : "";
-      throw new Error(`Không thể khởi tạo PXH Dubbing trên tab YouTube${detail}`);
+      throw new Error(`Không thể khởi tạo PXH Dubbing trên trang video${detail}`);
     }
   }
 }
 
 function render(state?: ExtensionState): void {
-  const value = state ?? { enabled: false, status: "idle", message: "Mở một video YouTube", processedSegments: 0, source: "—" };
+  const value = state ?? { enabled: false, status: "idle", message: "Mở một trang có video", processedSegments: 0, source: "—" };
   currentState = value;
   query("#status").textContent = value.message;
   query("#source").textContent = value.source;
   query("#count").textContent = `${value.processedSegments} đoạn`;
   query("#statusDot").className = `status-dot ${value.status}`;
   const toggle = query<HTMLButtonElement>("#dubbingToggle");
-  toggle.disabled = toggling || modelState !== "ready" || !tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch");
+  toggle.disabled = toggling || modelState !== "ready" || !tab?.id || !isSupportedVideoPage(tab.url);
   toggle.dataset.active = String(value.enabled);
   toggle.textContent = toggling ? "Đang chuẩn bị…" : modelState === "loading" ? `Đang tải model ${modelProgress}%` : value.enabled ? "Dừng lồng tiếng" : "Bắt đầu lồng tiếng";
 }
@@ -197,7 +204,7 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
 
 void activeTab().then(async (active) => {
   tab = active;
-  if (!tab?.id || !tab.url?.startsWith("https://www.youtube.com/watch")) { render(); return; }
+  if (!tab?.id || !isSupportedVideoPage(tab.url)) { render(); return; }
   try { render(await ensureDubbingContent(tab.id)); }
   catch (error) {
     render({ enabled: false, status: "error", message: error instanceof Error ? error.message : "Không thể khởi tạo extension", processedSegments: 0, source: "—" });

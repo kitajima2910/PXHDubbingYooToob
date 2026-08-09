@@ -298,3 +298,70 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Video không transcript không thể đạt độ trễ bằng pipeline DOM: vẫn phải chờ kết câu, Whisper, dịch và TTS. Máy yếu hoặc Edge TTS mạng chậm sẽ kích hoạt cơ chế tạm dừng để bắt kịp.
+
+## Live Caption floating miễn phí — 2026-08-09
+
+### Đã thay đổi
+- Thêm Live Caption lời gốc nhỏ ở góc trên-phải, chỉ xuất hiện trong chế độ Whisper.
+- Caption cập nhật ngay khi Whisper local trả segment, trước bước dịch và Edge TTS.
+- Nút `−` thu gọn caption thành huy hiệu `CC`; bấm `CC` để mở lại.
+- Ghi nhớ trạng thái thu gọn bằng `chrome.storage.local`; tự ẩn khi dừng dubbing hoặc dùng transcript DOM.
+- Toàn bộ caption dùng kết quả Whisper local hiện có, không gọi thêm API trả phí.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại và chứa Live Caption trong `content.js`.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Caption hiện theo segment final của VAD/Whisper (thường sau khoảng lặng 350 ms), chưa phải token partial streaming từng từ.
+
+## Live Caption chỉ hiển thị tiếng Việt — 2026-08-09
+
+### Đã thay đổi
+- Không còn đưa transcript nguyên ngữ từ Whisper lên floating caption.
+- Caption chỉ cập nhật sau khi có `translatedText` tiếng Việt hợp lệ và dùng cùng nội dung với TTS.
+- Trong lúc chưa có bản dịch, caption giữ trạng thái `Đang nghe…` thay vì hiển thị tiếng Anh/Trung.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Sherpa WASM streaming cần tự build bằng Emscripten; model bilingual Trung–Anh int8 gần 190 MB chưa tính runtime, nên chưa thay Whisper production khi chưa có benchmark tải/RAM/MV3.
+
+## Hỗ trợ video HTML5 ngoài YouTube — 2026-08-09
+
+### Đã thay đổi
+- Content script chạy trên trang HTTP/HTTPS; popup cho phép bắt đầu khi tab web hợp lệ.
+- Trang YouTube `/watch` vẫn ưu tiên transcript DOM như cũ.
+- Các nền tảng khác có `<video>` đi thẳng vào tabCapture, Whisper local, dịch Việt, Live Caption Việt và TTS Việt.
+- Tạo media ID ổn định từ URL trang và `currentSrc` để cache transcript/dịch cho video web.
+- Background chỉ cho content từ tab HTTP/HTTPS gọi API, thay cho giới hạn riêng YouTube.
+
+### File đã sửa
+- `public/manifest.json`
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `src/extension/background.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 56/56 test pass, 11/11 file.
+- `npx.cmd vite build`: pass; manifest build parse hợp lệ.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- DRM, player không dùng HTML5 video, iframe khác miền và trang chặn capture có thể không hoạt động; đây là giới hạn nền tảng/trình duyệt.

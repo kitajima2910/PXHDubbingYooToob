@@ -630,7 +630,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     return;
   }
   if (request?.action !== "api-request" || !request.requestId || !request.path || !allowedPaths.has(request.path)) return;
-  if (sender.tab?.url && !sender.tab.url.startsWith("https://www.youtube.com/watch")) {
+  if (sender.tab?.url && !/^https?:\/\//i.test(sender.tab.url)) {
     respond({ ok: false, status: 403, message: "Trang gọi API không được phép" });
     return;
   }
