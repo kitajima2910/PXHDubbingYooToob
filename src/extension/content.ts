@@ -12,6 +12,7 @@ import { createSpeech, loadBackendCaptions, loadCachedTranscript, saveCachedTran
 import { AudioScheduler } from "./audio/scheduler";
 import { loadYouTubeCaptions } from "./youtube/captions";
 import { prepareBrowserTranslation, translateWithBrowser } from "./translation/browser-translator";
+import { LiveTranscriptStore } from "./live-transcript-store";
 
 let state: ExtensionState = { enabled: false, status: "idle", message: "Sẵn sàng", processedSegments: 0, source: "—" };
 let scheduler: AudioScheduler | undefined;
@@ -45,8 +46,9 @@ let liveCaption: HTMLDivElement | undefined;
 let liveCaptionCollapsed = false;
 let streamingPartialTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 let streamingPartialIndex = 0;
-let streamingPartialText = "";
 let streamingPartialRunning = false;
+const liveTranscript = new LiveTranscriptStore();
+const streamingTranslationPending = new Map<string, string>();
 let streamingSpeechIndex = 0;
 let streamingStablePending = "";
 let streamingStableRunning = false;
@@ -99,27 +101,54 @@ function showVietnameseLiveCaption(segments: SubtitleSegment[]): void {
   root.hidden = false;
 }
 
+function renderLiveTranscript(): void {
+  if (!whisperMode) return;
+  const root = ensureLiveCaption();
+  const output = root.querySelector<HTMLElement>("[data-live-caption-text]");
+  if (!output) return;
+  const records = liveTranscript.recent(2);
+  output.replaceChildren();
+  for (const record of records) {
+    const line = document.createElement("div");
+    line.dataset.segmentId = record.id;
+    line.dataset.status = record.status;
+    line.dataset.startMs = String(record.startMs);
+    line.dataset.endMs = String(record.endMs);
+    line.textContent = record.translatedText?.trim() || "Đang dịch…";
+    line.style.opacity = record.status === "partial" ? "1" : ".78";
+    output.append(line);
+  }
+  root.hidden = records.length === 0;
+}
+
 function hideLiveCaption(): void {
   if (liveCaption) liveCaption.hidden = true;
 }
 
-function queueStreamingPartialTranslation(sourceText: string): void {
+function queueStreamingPartialTranslation(utteranceId: string, sourceText: string): void {
   const signal = controller?.signal;
   if (!signal || signal.aborted || !sourceText.trim()) return;
-  streamingPartialText = sourceText;
-  if (streamingPartialTimer !== undefined) return;
+  streamingTranslationPending.set(utteranceId, sourceText);
+  if (streamingPartialTimer !== undefined || streamingPartialRunning) return;
   streamingPartialTimer = globalThis.setTimeout(() => {
     streamingPartialTimer = undefined;
-    if (streamingPartialRunning) return;
     streamingPartialRunning = true;
     void (async () => {
-      while (streamingPartialText && !signal.aborted && whisperMode) {
-        const latestText = streamingPartialText; streamingPartialText = "";
+      while (streamingTranslationPending.size && !signal.aborted && whisperMode) {
+        const next = streamingTranslationPending.entries().next().value as [string, string] | undefined;
+        if (!next) break;
+        const [id, latestText] = next;
+        streamingTranslationPending.delete(id);
         const index = streamingPartialIndex++;
-        const now = Math.round((document.querySelector<HTMLVideoElement>("video")?.currentTime ?? 0) * 1000);
-        const segment: SubtitleSegment = { id: `stream-partial-${index}`, startMs: now, endMs: now + 1_000, sourceText: latestText };
+        const record = liveTranscript.get(id);
+        if (!record) continue;
+        const segment: SubtitleSegment = { ...record, id: `stream-partial-${index}`, sourceText: latestText };
         const translated = await translateForVideo([segment], signal);
-        if (!signal.aborted) showVietnameseLiveCaption(translated);
+        const translatedText = translated[0]?.translatedText;
+        if (translatedText && !signal.aborted) {
+          liveTranscript.setTranslation(id, latestText, translatedText);
+          renderLiveTranscript();
+        }
       }
     })().catch(() => undefined).finally(() => { streamingPartialRunning = false; });
   }, 350);
@@ -432,7 +461,13 @@ async function processWhisperChunk(chunk: WhisperChunk, signal: AbortSignal): Pr
     startMs: segment.startMs + scheduleShiftMs,
     endMs: segment.endMs + scheduleShiftMs,
   })) : translated;
-  if (chunk.updateCaption !== false) showVietnameseLiveCaption(scheduledTranslations);
+  if (chunk.updateCaption !== false) {
+    for (const segment of scheduledTranslations) {
+      liveTranscript.upsert(segment.id, segment.startMs, segment.endMs, segment.sourceText, "final");
+      if (segment.translatedText) liveTranscript.setTranslation(segment.id, segment.sourceText, segment.translatedText);
+    }
+    renderLiveTranscript();
+  }
   update({ status: "speaking", message: "Đang tạo giọng nói" });
   const prepare = async (segment: SubtitleSegment): Promise<void> => {
     const dubbingText = segment.translatedText ?? segment.sourceText;
@@ -616,7 +651,8 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
 async function stop(stopCapture = true): Promise<ExtensionState> {
   controller?.abort(); controller = undefined;
   if (streamingPartialTimer !== undefined) globalThis.clearTimeout(streamingPartialTimer);
-  streamingPartialTimer = undefined; streamingPartialText = ""; streamingPartialIndex = 0; streamingPartialRunning = false;
+  streamingPartialTimer = undefined; streamingPartialIndex = 0; streamingPartialRunning = false;
+  streamingTranslationPending.clear(); liveTranscript.clear();
   streamingStablePending = ""; streamingStableRunning = false; streamingSpeechIndex = 0;
   whisperMode = false; whisperProcessing = false; whisperQueue = [];
   resumeAfterWhisperWarmup = false; whisperInitialPauseDone = false;
@@ -631,7 +667,7 @@ async function stop(stopCapture = true): Promise<ExtensionState> {
 
 function fail(message: string): ExtensionState { update({ enabled: false, status: "error", message }); scheduler?.clear(); return state; }
 
-chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; capturedAt?: number; startMs?: number; type?: string; progress?: number; message?: string; text?: string; fullText?: string; segments?: SubtitleSegment[]; active?: boolean }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?: number; sourceVolume?: number; durationMs?: number; capturedAt?: number; startMs?: number; type?: string; progress?: number; message?: string; text?: string; fullText?: string; utteranceId?: string; segments?: SubtitleSegment[]; active?: boolean }, _sender, respond) => {
   if (request.action === "local-model-event") {
     respond({ ok: true }); return;
   }
@@ -715,7 +751,14 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
     respond({ ok: true }); return;
   }
   if (request.action === "streaming-local-partial") {
-    if (whisperMode && request.text) queueStreamingPartialTranslation(request.text);
+    const video = document.querySelector<HTMLVideoElement>("video");
+    if (whisperMode && video && request.text) {
+      const id = request.utteranceId ?? `sherpa-live-${streamingPartialIndex}`;
+      const now = Math.round(video.currentTime * 1000);
+      liveTranscript.upsert(id, now, now + 500, request.text, "partial");
+      renderLiveTranscript();
+      queueStreamingPartialTranslation(id, request.text);
+    }
     respond({ ok: true }); return;
   }
   if (request.action === "streaming-local-stable") {
@@ -724,7 +767,15 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   }
   if (request.action === "streaming-local-final") {
     const video = document.querySelector<HTMLVideoElement>("video");
-    if (whisperMode && request.fullText) queueStreamingPartialTranslation(request.fullText);
+    const utteranceId = request.utteranceId ?? `sherpa-final-${Date.now()}`;
+    if (whisperMode && video && request.fullText) {
+      const elapsedSinceCapture = Math.max(0, Date.now() - (request.capturedAt ?? Date.now()));
+      const capturedEndMs = Math.max(0, Math.round(video.currentTime * 1000 - (!video.paused ? elapsedSinceCapture * video.playbackRate : 0)));
+      const durationMs = Math.max(400, request.durationMs ?? 1_000);
+      liveTranscript.upsert(utteranceId, capturedEndMs - durationMs, capturedEndMs, request.fullText, "final");
+      renderLiveTranscript();
+      queueStreamingPartialTranslation(utteranceId, request.fullText);
+    }
     if (controller && video && whisperMode && request.text) {
       const elapsedSinceCapture = Math.max(0, Date.now() - (request.capturedAt ?? Date.now()));
       const capturedEndMs = Math.max(0, Math.round(video.currentTime * 1000 - (!video.paused ? elapsedSinceCapture * video.playbackRate : 0)));

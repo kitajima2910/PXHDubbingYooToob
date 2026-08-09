@@ -511,7 +511,7 @@ async function loadYouTubeSubtitles(body: unknown, signal: AbortSignal): Promise
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
-  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; streamId?: string; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; fullText?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
+  const request = message as { action?: string; requestId?: string; path?: string; body?: unknown; responseType?: "json" | "audio"; tabId?: number; streamId?: string; sourceVolume?: number; audioBase64?: string; mimeType?: string; durationMs?: number; capturedAt?: number; text?: string; fullText?: string; utteranceId?: string; rate?: number; type?: string; progress?: number; segments?: BackgroundSegment[]; message?: string; active?: boolean } | null;
   if (request?.action === "local-model-init") {
     const tabId = sender.tab?.id ?? request.tabId;
     void ensureOffscreenDocument()
@@ -539,19 +539,19 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   }
   if (request?.action === "capture-local-partial" && request.tabId !== undefined) {
     void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-partial", text: request.text,
+      action: "streaming-local-partial", utteranceId: request.utteranceId, text: request.text,
     }).catch(() => undefined);
     respond({ ok: true }); return;
   }
   if (request?.action === "capture-local-stable" && request.tabId !== undefined) {
     void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-stable", text: request.text,
+      action: "streaming-local-stable", utteranceId: request.utteranceId, text: request.text,
     }).catch(() => undefined);
     respond({ ok: true }); return;
   }
   if (request?.action === "capture-local-final" && request.tabId !== undefined) {
     void chrome.tabs.sendMessage(request.tabId, {
-      action: "streaming-local-final", text: request.text, fullText: request.fullText,
+      action: "streaming-local-final", utteranceId: request.utteranceId, text: request.text, fullText: request.fullText,
       durationMs: request.durationMs, capturedAt: request.capturedAt,
     }).catch(() => undefined);
     respond({ ok: true }); return;

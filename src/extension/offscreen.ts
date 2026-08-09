@@ -16,6 +16,7 @@ let sherpaStream: any;
 let sherpaLastPartial = "";
 let sherpaCommittedSource = "";
 let sherpaUtteranceStartedAt = 0;
+let sherpaUtteranceIndex = 0;
 let transcriptionId = 0;
 let backpressureActive = false;
 const modelSubscribers = new Set<number>();
@@ -154,7 +155,7 @@ function publishStableSpeech(previous: string, current: string): void {
     || (/[\u3400-\u9fff]/u.test(delta) ? delta.length >= 6 : delta.split(/\s+/u).length >= 3);
   if (!enough) return;
   sherpaCommittedSource = stable;
-  void chrome.runtime.sendMessage({ action: "capture-local-stable", tabId: targetTabId, text: delta });
+  void chrome.runtime.sendMessage({ action: "capture-local-stable", tabId: targetTabId, utteranceId: `sherpa-${sherpaUtteranceIndex}`, text: delta });
 }
 
 function joinFrames(frames: Float32Array[]): Float32Array {
@@ -187,15 +188,17 @@ function acceptPcm(samples: Float32Array): void {
     if (text && text !== sherpaLastPartial) {
       publishStableSpeech(sherpaLastPartial, text);
       sherpaLastPartial = text;
-      void chrome.runtime.sendMessage({ action: "capture-local-partial", tabId: targetTabId, text });
+      void chrome.runtime.sendMessage({ action: "capture-local-partial", tabId: targetTabId, utteranceId: `sherpa-${sherpaUtteranceIndex}`, text });
     }
     if (sherpaRecognizer.isEndpoint(sherpaStream)) {
       const durationMs = Math.max(400, Date.now() - sherpaUtteranceStartedAt);
       const remainingText = text.startsWith(sherpaCommittedSource) ? text.slice(sherpaCommittedSource.length).trim() : text;
       if (text) void chrome.runtime.sendMessage({
-        action: "capture-local-final", tabId: targetTabId, durationMs, capturedAt: Date.now(), text: remainingText, fullText: text,
+        action: "capture-local-final", tabId: targetTabId, utteranceId: `sherpa-${sherpaUtteranceIndex}`,
+        durationMs, capturedAt: Date.now(), text: remainingText, fullText: text,
       });
       sherpaRecognizer.reset(sherpaStream);
+      sherpaUtteranceIndex += 1;
       sherpaLastPartial = ""; sherpaCommittedSource = ""; sherpaUtteranceStartedAt = Date.now();
     }
     return;

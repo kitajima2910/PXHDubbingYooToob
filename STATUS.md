@@ -498,3 +498,31 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Brave vẫn dùng Google Translate fallback qua mạng vì không có Translator API local. Single-flight ngăn mất caption và nghẽn request nhưng không thể bảo đảm độ trễ Google Meet nếu dịch vụ mạng phản hồi chậm.
+
+## Transcript DOM nội bộ cho video không subtitle — 2026-08-09
+
+### Đã thay đổi gì
+- Thêm `LiveTranscriptStore` làm nguồn dữ liệu chung cho transcript tự tạo, thay vì truyền các chuỗi partial/final rời rạc.
+- Mỗi utterance Sherpa có ID ổn định; partial cập nhật cùng record, giữ nguyên `startMs`, mở rộng `endMs`; endpoint chuyển record sang `final` thay vì tạo segment trùng.
+- Bản dịch được lưu cùng record và giữ lại bản dịch hypothesis gần nhất trong lúc source tiếp tục phát triển, tránh caption trắng/mất câu.
+- Hàng đợi dịch dùng `Map<utteranceId, latestText>`: coalesce revision của cùng câu nhưng không làm mất endpoint của câu trước khi câu mới bắt đầu.
+- Floating subtitle giờ render DOM node riêng cho từng segment với `data-segment-id`, `data-status`, `data-start-ms`, `data-end-ms`.
+- Cả Sherpa streaming và Whisper fallback đều ghi transcript/bản dịch vào store; renderer chỉ đọc store, còn TTS scheduler tiếp tục dùng timestamp của segment.
+- Store giới hạn 80 record gần nhất để tránh tăng RAM vô hạn; overlay hiển thị hai record mới nhất.
+
+### File đã sửa
+- `src/extension/live-transcript-store.ts`
+- `src/extension/offscreen.ts`
+- `src/extension/background.ts`
+- `src/extension/content.ts`
+- `tests/live-transcript-store.test.ts`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 59/59 test pass, 12/12 file.
+- `npx.cmd vite build`: pass.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Transcript DOM giúp đồng bộ trạng thái/timestamp và không mất segment, nhưng độ trễ dịch Việt trên Brave vẫn phụ thuộc Google Translate fallback qua mạng.
