@@ -27,6 +27,7 @@ let resumeAfterWhisperWarmup = false;
 let whisperInitialPauseDone = false;
 let chromeTtsAvailable = false;
 let recentDubbingTexts: Array<{ text: string; expiresAt: number }> = [];
+let availableCaptions: { videoId: string; segments: SubtitleSegment[]; source: string } | undefined;
 let seekVersion = 0;
 let scheduledEndMs = 0;
 let trainingRecorder: MediaRecorder | undefined;
@@ -368,7 +369,10 @@ async function start(delaySeconds: number, sourceVolume: number): Promise<Extens
   try {
     let captions: { segments: SubtitleSegment[]; source: string };
     try {
-      captions = await loadYouTubeCaptions();
+      captions = availableCaptions?.videoId === currentVideoId
+        ? { segments: availableCaptions.segments, source: availableCaptions.source }
+        : await loadYouTubeCaptions();
+      availableCaptions = { videoId: currentVideoId, segments: captions.segments, source: captions.source };
       void saveCachedTranscript(cacheContext(), captions.source, captions.segments, true).catch(() => undefined);
     }
     catch {
@@ -423,8 +427,14 @@ chrome.runtime.onMessage.addListener((request: { action?: string; delaySeconds?:
   if (request.action === "status") { respond(state); return; }
   if (request.action === "subtitle-availability") {
     void loadYouTubeCaptions().then(
-      (captions) => respond({ available: captions.segments.length > 0, source: captions.source }),
-      () => respond({ available: false, message: "Video này không có transcript hoặc subtitle" }),
+      (captions) => {
+        availableCaptions = { videoId: videoId(), segments: captions.segments, source: captions.source };
+        respond({ available: captions.segments.length > 0, source: captions.source });
+      },
+      () => {
+        availableCaptions = undefined;
+        respond({ available: false, message: "Video này không có transcript hoặc subtitle" });
+      },
     );
     return true;
   }

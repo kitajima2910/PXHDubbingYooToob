@@ -70,3 +70,27 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần reload extension từ `dist` và xác nhận trực tiếp trên một video có subtitle và một video không subtitle trong Chrome/Brave.
+
+## Fix có subtitle nhưng không phát dubbing — 2026-08-09
+
+### Đã thay đổi gì
+- Nguyên nhân gốc: popup vẫn bắt đầu `tabCapture` trước `start()` theo cơ chế Whisper cũ; capture lỗi sẽ chặn luôn pipeline transcript DOM dù video có subtitle.
+- Bỏ hoàn toàn `capture-start` khỏi nút lồng tiếng vì bản này chỉ hỗ trợ video có transcript/subtitle.
+- Lưu transcript đã tìm thấy khi popup kiểm tra và tái sử dụng lúc bấm bắt đầu, tránh gọi bridge YouTube lần hai và tránh kết quả không đồng nhất.
+- Giữ nút disabled và thông báo rõ đối với video không có transcript/subtitle.
+
+### File đã sửa
+- `src/extension/content.ts`
+- `src/extension/popup.ts`
+- `package.json`
+- `public/manifest.json`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test`: 53/53 test pass, 10/10 file.
+- `npx.cmd vite build`: pass.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần reload extension từ `dist` để trình duyệt dùng bundle mới; tab đã mở cũng cần refresh.

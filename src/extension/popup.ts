@@ -155,17 +155,7 @@ query<HTMLButtonElement>("#dubbingToggle").addEventListener("click", () => {
     // Start any browser-managed language-pack download during the user's click.
     // This is best-effort and never blocks the normal Groq/cache path.
     void chrome.tabs.sendMessage(tab!.id!, { action: "prepare-offline-translation" }).catch(() => undefined);
-    const capture = await chrome.runtime.sendMessage({ action: "capture-start", tabId: tab!.id, sourceVolume: 0.08 }) as { ok?: boolean; message?: string };
-    if (!capture?.ok && capture?.message) {
-      // Permission error — show immediately.
-      throw new Error(capture.message);
-    }
     const result = await chrome.tabs.sendMessage(tab!.id!, { action: "start", delaySeconds: 5, sourceVolume: 0.08 }) as ExtensionState;
-    if (result.source.startsWith("Whisper") && !capture?.ok) {
-      await chrome.tabs.sendMessage(tab!.id!, { action: "stop" }).catch(() => undefined);
-      throw new Error(capture?.message ?? "Không thể cấp quyền thu âm tab");
-    }
-    if (!result.enabled && result.status === "error") void chrome.runtime.sendMessage({ action: "capture-stop" });
     return result;
   })().then((state) => render(state), (error: unknown) => render({
     enabled: false, status: "error", message: error instanceof Error ? error.message : "Không thể điều khiển dubbing", processedSegments: 0, source: "—",
