@@ -156,3 +156,29 @@ Tất cả tính năng cốt lõi hoạt động. Free, không cần API key tr�
 
 ### Vấn đề còn lại
 - Cần kiểm tra trực tiếp thao tác bấm video đề xuất/Next trong YouTube sau khi reload extension.
+
+## Fix release cài mới bị từ chối TTS — 2026-08-11
+
+### Đã thay đổi gì
+- Nguyên nhân gốc: backend chỉ chấp nhận đúng `EXTENSION_ORIGIN` đã cấu hình, trong khi Chrome cấp ID khác cho extension được tải từ release và cài dạng unpacked; request `/api/tts` vì vậy bị trả `403 ORIGIN_DENIED`.
+- Cho phép origin có đúng định dạng ID Chrome extension động và phản hồi CORS theo origin thực tế của bản cài.
+- Giữ nguyên việc từ chối các origin web không khớp cấu hình.
+- Thêm test hồi quy cho cả bản cài release có ID động và origin web không được phép.
+- Build tự cập nhật phiên bản source và manifest từ `0.2.27` lên `0.2.28`.
+
+### File đã sửa
+- `src/api/lib/http.ts`
+- `tests/http.test.ts`
+- `package.json`
+- `public/manifest.json`
+- `STATUS.md`
+
+### Kết quả kiểm tra
+- `npm.cmd run check`: pass.
+- `npm.cmd test -- tests/http.test.ts`: 3/3 test pass.
+- `npm.cmd test`: 55/55 test pass, 10/10 file.
+- `npm.cmd run build`: pass; `dist` đã được tạo lại.
+- `git diff --check`: pass.
+
+### Vấn đề còn lại
+- Cần deploy backend Vercel từ source mới; chỉ reload/cài lại extension mà backend production vẫn dùng code cũ thì lỗi `ORIGIN_DENIED` vẫn còn.

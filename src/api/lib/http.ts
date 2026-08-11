@@ -1,12 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
+const chromeExtensionOrigin = /^chrome-extension:\/\/[a-p]{32}$/;
 
 export function prepare(req: VercelRequest, res: VercelResponse, maxBytes = 64_000): boolean {
   const allowedOrigin = process.env.EXTENSION_ORIGIN;
   const origin = req.headers.origin;
-  if (allowedOrigin && origin && origin !== allowedOrigin) { jsonError(res, 403, "ORIGIN_DENIED", "Nguồn yêu cầu không được phép"); return false; }
-  res.setHeader("Access-Control-Allow-Origin", allowedOrigin ?? "*");
+  const isInstalledExtension = typeof origin === "string" && chromeExtensionOrigin.test(origin);
+  if (allowedOrigin && origin && origin !== allowedOrigin && !isInstalledExtension) { jsonError(res, 403, "ORIGIN_DENIED", "Nguồn yêu cầu không được phép"); return false; }
+  res.setHeader("Access-Control-Allow-Origin", isInstalledExtension ? origin : allowedOrigin ?? "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Vary", "Origin");
